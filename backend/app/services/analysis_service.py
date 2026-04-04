@@ -1,50 +1,67 @@
 import json
-import google.generativeai as genai
+import logging
 
-from app.core.config import Settings
+from app.llm.provider_factory import LlmProviderFactory
+from app.prompts.requirement_analysis_prompt import build_requirement_analysis_prompt
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisService:
-    def __init__(self):
-        genai.configure(api_key=Settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel("gemini-2.5-flash")
-
     def analyze(self, text: str, provider: str) -> dict:
-        prompt = f"""
-You are a software requirements engineering assistant.
+        logger.info("Analyze request started. Provider: %s", provider)
 
-Analyze the following requirement:
-{text}
+        prompt = build_requirement_analysis_prompt(text)
 
-Return a JSON object with these fields:
-- userStory
-- requirementType
-- ambiguities
-- suggestions
-- improvedText
+        try:
+            llm_provider = LlmProviderFactory.create(provider)
+            raw_response = llm_provider.generate(prompt)
 
-Rules:
-- requirementType must be one of: Functional, Performance, Security, Usability, Reliability, Other
-- ambiguities must be an array of objects with: phrase, reason, severity
-- suggestions must be an array of objects with: originalPart, suggestedPart, reason
-- Return only valid JSON
-"""
+            parsed = self._parse_response(raw_response)
 
-        response = self.model.generate_content(prompt)
-        raw_text = response.text.strip()
+            logger.info("Analyze request completed successfully. Provider: %s", provider)
 
-        if raw_text.startswith("```json"):
-            raw_text = raw_text.replace("```json", "", 1).strip()
-        if raw_text.endswith("```"):
-            raw_text = raw_text[:-3].strip()
+            return {
+                "originalText": text,
+                "userStory": parsed["userStory"],
+                "requirementType": parsed["requirementType"],
+                "ambiguities": parsed["ambiguities"],
+                "suggestions": parsed["suggestions"],
+                "improvedText": parsed["improvedText"],
+                "providerUsed": provider,
+                "isFallback": False,
+                "warnings": [],
+                "errors": []
+            }
 
-        parsed = json.loads(raw_text)
+        except Exception as e:
+            logger.error("Provider failed. Falling back to mock. Error: %s", str(e))
 
-        return {
-            "originalText": text,
-            "userStory": parsed["userStory"],
-            "requirementType": parsed["requirementType"],
-            "ambiguities": parsed["ambiguities"],
-            "suggestions": parsed["suggestions"],
-            "improvedText": parsed["improvedText"]
-        }
+            # fallback → mock
+            mock_provider = LlmProviderFactory.create("mock")
+            raw_response = mock_provider.generate(prompt)
+            parsed = self._parse_response(raw_response)
+
+            return {
+                "originalText": text,
+                "userStory": parsed["userStory"],
+                "requirementType": parsed["requirementType"],
+                "ambiguities": parsed["ambiguities"],
+                "suggestions": parsed["suggestions"],
+                "improvedText": parsed["improvedText"],
+                "providerUsed": provider,
+                "isFallback": True,
+                "warnings": ["Selected provider failed. Mock response returned."],
+                "errors": [str(e)]
+            }
+
+    def _parse_response(self, raw_response: str) -> dict:
+        cleaned_response = raw_response.strip()
+
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response.replace("```json", "", 1).strip()
+
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3].strip()
+
+        return json.loads(cleaned_response)

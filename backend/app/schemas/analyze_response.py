@@ -20,3 +20,7 @@ class AnalyzeResponse(BaseModel):
     ambiguities: list[AmbiguityItem]
     suggestions: list[SuggestionItem]
     improvedText: str
+    providerUsed: str
+    isFallback: bool
+    warnings: list[str]
+    errors: list[str]

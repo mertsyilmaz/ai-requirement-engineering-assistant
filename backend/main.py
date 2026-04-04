@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 
-from app.api.analysis_controller import router as analysis_router
+from app.api.v1.router import router as v1_router
+from app.core.logging_config import setup_logging
+
+setup_logging()
 
 app = FastAPI()
 
@@ -10,4 +13,4 @@ def root():
     return {"message": "Backend is running"}
 
 
-app.include_router(analysis_router)
+app.include_router(v1_router)
