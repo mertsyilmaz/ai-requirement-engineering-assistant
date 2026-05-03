@@ -6,5 +6,6 @@ from app.api.v1.health_controller import router as health_router
 
 router = APIRouter()
 
+# Combines all v1 API routers under one router imported by main.py.
 router.include_router(analysis_router)
 router.include_router(health_router)

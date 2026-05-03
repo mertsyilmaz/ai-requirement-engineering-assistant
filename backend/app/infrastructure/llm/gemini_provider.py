@@ -1,10 +1,10 @@
 import google.generativeai as genai
 
 from app.core.config import Settings
-from app.llm.base import LlmProvider
+from app.application.ports.llm_provider import LlmProviderPort
 
 
-class GeminiProvider(LlmProvider):
+class GeminiProvider(LlmProviderPort):
     def __init__(self):
         genai.configure(api_key=Settings.GEMINI_API_KEY)
         self.model = genai.GenerativeModel("gemini-2.5-flash")

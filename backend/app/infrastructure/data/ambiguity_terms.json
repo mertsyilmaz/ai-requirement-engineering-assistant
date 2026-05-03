@@ -1,0 +1,338 @@
+[
+  {
+    "phrase": "fast",
+    "reason": "The performance expectation is not measurable without a concrete target.",
+    "severity": "medium",
+    "category": "performance",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_performance_context"
+  },
+  {
+    "phrase": "quick",
+    "reason": "The time expectation is not measurable without a concrete target.",
+    "severity": "medium",
+    "category": "performance",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_performance_context"
+  },
+  {
+    "phrase": "quickly",
+    "reason": "The time expectation is not measurable without a concrete target.",
+    "severity": "medium",
+    "category": "performance",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_performance_context"
+  },
+  {
+    "phrase": "responsive",
+    "reason": "The responsiveness expectation is not measurable without a concrete response-time target.",
+    "severity": "medium",
+    "category": "performance",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_performance_context"
+  },
+  {
+    "phrase": "efficient",
+    "reason": "The efficiency expectation is unclear without measurable criteria.",
+    "severity": "medium",
+    "category": "performance",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_performance_context"
+  },
+  {
+    "phrase": "high performance",
+    "reason": "The performance target is not measurable.",
+    "severity": "medium",
+    "category": "performance",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_performance_context"
+  },
+  {
+    "phrase": "low latency",
+    "reason": "The latency expectation is not measurable without a concrete threshold.",
+    "severity": "medium",
+    "category": "performance",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_performance_context"
+  },
+  {
+    "phrase": "real-time",
+    "reason": "The timing expectation is unclear without a defined maximum delay.",
+    "severity": "high",
+    "category": "performance",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_performance_context"
+  },
+  {
+    "phrase": "user-friendly",
+    "reason": "The usability expectation is subjective without specific usability criteria.",
+    "severity": "medium",
+    "category": "usability",
+    "matchType": "phrase",
+    "validationRule": "requires_usability_criteria"
+  },
+  {
+    "phrase": "easy",
+    "reason": "The ease-of-use expectation is subjective without specific criteria.",
+    "severity": "medium",
+    "category": "usability",
+    "matchType": "phrase",
+    "validationRule": "requires_usability_criteria"
+  },
+  {
+    "phrase": "simple",
+    "reason": "The simplicity expectation is subjective without objective usability criteria.",
+    "severity": "medium",
+    "category": "usability",
+    "matchType": "phrase",
+    "validationRule": "requires_usability_criteria"
+  },
+  {
+    "phrase": "intuitive",
+    "reason": "The usability expectation is subjective without observable criteria.",
+    "severity": "medium",
+    "category": "usability",
+    "matchType": "phrase",
+    "validationRule": "requires_usability_criteria"
+  },
+  {
+    "phrase": "clear",
+    "reason": "The clarity expectation is subjective without concrete acceptance criteria.",
+    "severity": "low",
+    "category": "usability",
+    "matchType": "phrase",
+    "validationRule": "requires_usability_criteria"
+  },
+  {
+    "phrase": "secure",
+    "reason": "The security expectation is unclear without specified controls, standards, or threat scope.",
+    "severity": "high",
+    "category": "security",
+    "matchType": "phrase",
+    "validationRule": "requires_security_controls"
+  },
+  {
+    "phrase": "safe",
+    "reason": "The safety expectation is unclear without defined risks or safety criteria.",
+    "severity": "high",
+    "category": "security",
+    "matchType": "phrase",
+    "validationRule": "requires_security_controls"
+  },
+  {
+    "phrase": "protected",
+    "reason": "The protection requirement is unclear without specifying what is protected and how.",
+    "severity": "high",
+    "category": "security",
+    "matchType": "phrase",
+    "validationRule": "requires_security_controls"
+  },
+  {
+    "phrase": "encrypted",
+    "reason": "The encryption requirement is incomplete without specifying algorithm, scope, or data state.",
+    "severity": "medium",
+    "category": "security",
+    "matchType": "phrase",
+    "validationRule": "requires_security_controls"
+  },
+  {
+    "phrase": "reliable",
+    "reason": "The reliability expectation is not measurable without failure-rate or recovery criteria.",
+    "severity": "medium",
+    "category": "reliability",
+    "matchType": "phrase",
+    "validationRule": "requires_reliability_criteria"
+  },
+  {
+    "phrase": "robust",
+    "reason": "The robustness expectation is unclear without failure scenarios or tolerance criteria.",
+    "severity": "medium",
+    "category": "reliability",
+    "matchType": "phrase",
+    "validationRule": "requires_reliability_criteria"
+  },
+  {
+    "phrase": "stable",
+    "reason": "The stability expectation is unclear without measurable failure or uptime criteria.",
+    "severity": "medium",
+    "category": "reliability",
+    "matchType": "phrase",
+    "validationRule": "requires_reliability_criteria"
+  },
+  {
+    "phrase": "available",
+    "reason": "The availability expectation is incomplete without uptime or availability percentage.",
+    "severity": "medium",
+    "category": "availability",
+    "matchType": "phrase",
+    "validationRule": "requires_availability_criteria"
+  },
+  {
+    "phrase": "highly available",
+    "reason": "The availability expectation is not measurable without a concrete uptime target.",
+    "severity": "high",
+    "category": "availability",
+    "matchType": "phrase",
+    "validationRule": "requires_availability_criteria"
+  },
+  {
+    "phrase": "scalable",
+    "reason": "The scalability expectation is unclear without workload, user count, or throughput targets.",
+    "severity": "medium",
+    "category": "scalability",
+    "matchType": "phrase",
+    "validationRule": "requires_scalability_criteria"
+  },
+  {
+    "phrase": "maintainable",
+    "reason": "The maintainability expectation is subjective without measurable maintenance criteria.",
+    "severity": "low",
+    "category": "maintainability",
+    "matchType": "phrase",
+    "validationRule": "requires_maintainability_criteria"
+  },
+  {
+    "phrase": "flexible",
+    "reason": "The flexibility expectation is unclear without specifying expected variation or configuration needs.",
+    "severity": "low",
+    "category": "maintainability",
+    "matchType": "phrase",
+    "validationRule": "requires_acceptance_criteria"
+  },
+  {
+    "phrase": "appropriate",
+    "reason": "The expected behavior is subjective without objective acceptance criteria.",
+    "severity": "medium",
+    "category": "quality",
+    "matchType": "phrase",
+    "validationRule": "requires_acceptance_criteria"
+  },
+  {
+    "phrase": "proper",
+    "reason": "The expected behavior is subjective without objective acceptance criteria.",
+    "severity": "medium",
+    "category": "quality",
+    "matchType": "phrase",
+    "validationRule": "requires_acceptance_criteria"
+  },
+  {
+    "phrase": "adequate",
+    "reason": "The quality expectation is unclear without measurable acceptance criteria.",
+    "severity": "medium",
+    "category": "quality",
+    "matchType": "phrase",
+    "validationRule": "requires_acceptance_criteria"
+  },
+  {
+    "phrase": "suitable",
+    "reason": "The suitability expectation is subjective without objective criteria.",
+    "severity": "medium",
+    "category": "quality",
+    "matchType": "phrase",
+    "validationRule": "requires_acceptance_criteria"
+  },
+  {
+    "phrase": "as soon as possible",
+    "reason": "The expected time frame is not measurable.",
+    "severity": "high",
+    "category": "time",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_performance_context"
+  },
+  {
+    "phrase": "soon",
+    "reason": "The expected time frame is not measurable.",
+    "severity": "medium",
+    "category": "time",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_time_context"
+  },
+  {
+    "phrase": "immediately",
+    "reason": "The expected time frame is unclear without a measurable time limit.",
+    "severity": "medium",
+    "category": "time",
+    "matchType": "phrase",
+    "validationRule": "requires_measurable_time_context"
+  },
+  {
+    "phrase": "periodically",
+    "reason": "The recurrence interval is not specified.",
+    "severity": "medium",
+    "category": "frequency",
+    "matchType": "phrase",
+    "validationRule": "requires_frequency_criteria"
+  },
+  {
+    "phrase": "regularly",
+    "reason": "The recurrence interval is not specified.",
+    "severity": "medium",
+    "category": "frequency",
+    "matchType": "phrase",
+    "validationRule": "requires_frequency_criteria"
+  },
+  {
+    "phrase": "from time to time",
+    "reason": "The recurrence interval is not specified.",
+    "severity": "medium",
+    "category": "frequency",
+    "matchType": "phrase",
+    "validationRule": "requires_frequency_criteria"
+  },
+  {
+    "phrase": "etc.",
+    "reason": "The requirement scope is open-ended and incomplete.",
+    "severity": "high",
+    "category": "scope",
+    "matchType": "phrase",
+    "validationRule": "open_ended_scope"
+  },
+  {
+    "phrase": "and so on",
+    "reason": "The requirement scope is open-ended and incomplete.",
+    "severity": "high",
+    "category": "scope",
+    "matchType": "phrase",
+    "validationRule": "open_ended_scope"
+  },
+  {
+    "phrase": "and others",
+    "reason": "The requirement scope is open-ended and incomplete.",
+    "severity": "medium",
+    "category": "scope",
+    "matchType": "phrase",
+    "validationRule": "open_ended_scope"
+  },
+  {
+    "phrase": "as needed",
+    "reason": "The condition or trigger is not specified.",
+    "severity": "medium",
+    "category": "condition",
+    "matchType": "phrase",
+    "validationRule": "requires_condition_criteria"
+  },
+  {
+    "phrase": "if necessary",
+    "reason": "The condition that makes the behavior necessary is not specified.",
+    "severity": "medium",
+    "category": "condition",
+    "matchType": "phrase",
+    "validationRule": "requires_condition_criteria"
+  },
+  {
+    "phrase": "\\b(some|many|several|various|multiple)\\b",
+    "reason": "The quantity is not measurable.",
+    "severity": "medium",
+    "category": "quantity",
+    "matchType": "regex",
+    "validationRule": "requires_quantifiable_amount"
+  },
+  {
+    "phrase": "\\b(large|small|minor|major|significant)\\b",
+    "reason": "The magnitude is subjective without measurable criteria.",
+    "severity": "medium",
+    "category": "quantity",
+    "matchType": "regex",
+    "validationRule": "requires_quantifiable_amount"
+  }
+]

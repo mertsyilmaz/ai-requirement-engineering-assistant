@@ -1,22 +1,41 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Virtual Environment
 venv/
+.venv/
+backend/venv/
+backend/.venv/
+
+# Environment Files
 .env
+.env.*
+backend/.env
+backend/.env.*
+!.env.example
+!backend/.env.example
 
 # VS Code
 .vscode/
+.local_context.md
 
-# Frontend (React)
+# Frontend
 frontend/node_modules/
 frontend/build/
+frontend/.env
+frontend/.env.*
 
 # Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # OS
 .DS_Store

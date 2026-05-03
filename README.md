@@ -1,233 +1,480 @@
-# AI-Based Requirement Engineering Assistant
+# AI Requirement Engineering Assistant
 
-AI-Based Requirement Engineering Assistant is a full-stack web application that analyzes natural language software requirements using Large Language Models (LLMs) and produces structured requirement engineering outputs.
+AI Requirement Engineering Assistant is a full-stack web application for analyzing natural language software requirements with LLM support and NLP-based pre-analysis.
+
+The system can generate user stories, detect ambiguities, suggest improvements, classify requirement type, and produce alternative improved requirement texts.
 
 ---
 
-## 🚀 Features
+## Features
 
-- Analyze raw software requirement text
-- Generate structured user stories
-- Detect ambiguous expressions
+- Analyze natural language software requirements
+- Generate user stories
+- Detect ambiguous requirement expressions
 - Suggest requirement improvements
-- Produce improved requirement text
-- Classify requirement types
-- Support multiple LLM providers (Gemini, Mock)
-- Automatic fallback to mock provider in case of errors
+- Generate improved requirement text
+- Generate multiple improved text alternatives
+- Classify requirement type
+- Support multiple providers:
+  - Mock
+  - Gemini
+- Automatic fallback to mock provider when selected provider fails
+- V1 and V2 analysis modes
+- NLP-based pre-analysis for V2
 
 ---
 
-## 🧱 Tech Stack
+## Analysis Versions
+
+### V1 - Direct LLM Analysis
+
+V1 uses the cleaned requirement text directly.
+
+Flow:
+
+```text
+Raw text
+-> Text cleaning
+-> V1 prompt generation
+-> LLM provider
+-> Analysis response
+```
+
+V1 does not run NLP pre-analysis.
+
+### V2 - NLP Enhanced Analysis
+
+V2 uses NLP-based pre-analysis before prompt generation.
+
+Flow:
+
+```text
+Raw text
+-> Text cleaning
+-> NLP pre-analysis
+-> V2 prompt generation
+-> LLM provider
+-> Analysis response
+```
+
+V2 pre-analysis detects:
+
+- Known ambiguity terms
+- Reference ambiguities
+- Measurement ambiguities
+- Measurable expressions
+
+---
+
+## Tech Stack
 
 ### Backend
-- Python
+
+- Python 3.12
 - FastAPI
 - Pydantic
+- spaCy
+- spaCy Transformers
 - Google Gemini API
-- Clean Architecture (layered structure)
+- python-dotenv
 
 ### Frontend
+
 - React
 - JavaScript
 - Fetch API
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
+```text
 ai-requirement-engineering-assistant/
-├── backend/
-├── frontend/
-└── README.md
+|-- backend/
+|   |-- app/
+|   |   |-- api/
+|   |   |-- application/
+|   |   |-- core/
+|   |   |-- domain/
+|   |   `-- infrastructure/
+|   |-- main.py
+|   |-- requirements.txt
+|   `-- .env
+|-- frontend/
+|   |-- src/
+|   `-- package.json
+|-- .gitignore
+`-- README.md
+```
 
 ---
 
-## ⚙️ Requirements
+## Requirements
 
-Before running the project, install:
+Install these before running the project:
 
-- Python 3.11+
-- Node.js (LTS)
+- Python 3.12
+- Node.js LTS
 - npm
 - Git
 
+Check Python version:
+
+```powershell
+py -3.12 --version
+```
+
 ---
 
-## 📥 1. Clone the Repository
+## Clone Repository
 
+```powershell
 git clone <YOUR_REPOSITORY_LINK>
 cd ai-requirement-engineering-assistant
+```
 
 ---
 
-## 🖥️ 2. Backend Setup
+## Backend Setup
 
 Go to backend folder:
 
+```powershell
 cd backend
+```
 
-Create virtual environment:
+Create virtual environment with Python 3.12:
 
-python -m venv venv
+```powershell
+py -3.12 -m venv venv
+```
 
-Activate virtual environment (Windows PowerShell):
+Activate virtual environment:
 
-venv\Scripts\activate
+```powershell
+.\venv\Scripts\activate
+```
 
-If blocked:
+If PowerShell blocks script execution:
 
+```powershell
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
 
 Install dependencies:
 
-pip install -r requirements.txt
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+```
 
-Create `.env` file inside backend folder:
+Verify spaCy installation:
 
+```powershell
+.\venv\Scripts\python.exe -c "import spacy; print(spacy.__version__)"
+```
+
+Verify spaCy model:
+
+```powershell
+.\venv\Scripts\python.exe -c "import spacy; nlp = spacy.load('en_core_web_trf'); print(nlp.pipe_names)"
+```
+
+Expected output should include:
+
+```text
+transformer
+tagger
+parser
+attribute_ruler
+lemmatizer
+ner
+```
+
+---
+
+## Environment Variables
+
+Create a `.env` file inside the backend folder:
+
+```text
 backend/.env
+```
 
 Add:
 
+```env
 GEMINI_API_KEY=your_gemini_api_key_here
-OPENAI_API_KEY=
+```
 
-Run backend:
-
-uvicorn main:app --reload
-
-Backend runs at:
-http://127.0.0.1:8000
-
-Swagger UI:
-http://127.0.0.1:8000/docs
+Mock provider does not require an API key.
 
 ---
 
-## 🌐 3. Frontend Setup
+## Run Backend
 
-Open a new terminal:
+From backend folder:
 
+```powershell
+.\venv\Scripts\uvicorn.exe main:app --reload
+```
+
+Backend runs at:
+
+```text
+http://127.0.0.1:8000
+```
+
+Swagger UI:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Note:
+
+The `google.generativeai` package may show a deprecation warning. This is currently only a warning and does not block the application.
+
+---
+
+## Frontend Setup
+
+Open a new terminal and go to frontend folder:
+
+```powershell
 cd frontend
+```
 
 Install dependencies:
 
+```powershell
 npm install
+```
 
 Run frontend:
 
+```powershell
 npm start
+```
 
 Frontend runs at:
+
+```text
 http://localhost:3000
+```
 
 ---
 
-## ▶️ 4. How to Use
+## How to Use
 
-1. Open frontend in browser
-2. Enter requirement text
-
-Example:
-The system should be fast and user-friendly.
-
+1. Open the frontend in browser.
+2. Enter a requirement text.
 3. Select provider:
-- mock → development/testing
-- gemini → real AI analysis
+   - Mock
+   - Gemini
+4. Select analysis version:
+   - V1
+   - V2
+5. Click Analyze.
 
-4. Click Analyze
+Example requirement:
+
+```text
+The system should be fast and respond within 2 seconds.
+```
 
 ---
 
-## 📊 Output
+## Output
 
 The system returns:
 
-- User Story
-- Requirement Type
+- Provider info
+- User story
+- Requirement type
 - Ambiguities
 - Suggestions
-- Improved Text
-- Provider Info
-- Warnings / Errors (if any)
+- Improved text
+- Improved text options
+- Generated prompt
+- Pre-analysis details for V2
 
 ---
 
-## 🤖 Provider Behavior
+## V2 Pre-analysis Output
 
-Mock Provider:
-- No API usage
-- Safe for development
-- Instant response
+V2 can return:
 
-Gemini Provider:
-- Real AI analysis
-- Requires API key
-- May depend on quota/billing
+- Candidate ambiguities
+- Confirmed ambiguities
+- Rejected candidates
+- Reference ambiguities
+- Measurement ambiguities
+- Measurable expressions
+
+Example:
+
+```text
+The system should be fast and respond within 2 seconds.
+```
+
+Possible V2 pre-analysis:
+
+```text
+Candidate ambiguity:
+- fast
+
+Rejected candidate:
+- fast, because within 2 seconds provides measurable context
+
+Measurement ambiguities:
+- statisticalTarget
+- loadCondition
+- measurementBoundary
+```
 
 ---
 
-## 🔁 Fallback Mechanism
+## API Endpoint
 
-If selected provider fails:
-
-- System automatically switches to mock provider
-- isFallback = true
-- Warning and error messages are returned
-
----
-
-## 📡 API Endpoint
-
+```text
 POST /api/v1/requirements/analyze
+```
 
 Example request:
 
+```json
 {
-  "text": "The system should be fast and user-friendly.",
-  "provider": "mock"
+  "text": "The system should be fast and respond within 2 seconds.",
+  "provider": "mock",
+  "analysisVersion": "v2"
 }
+```
+
+Example providers:
+
+```text
+mock
+gemini
+```
+
+Example analysis versions:
+
+```text
+v1
+v2
+```
 
 ---
 
-## ⚠️ Common Issues
+## Provider Behavior
 
-npx is not recognized:
-- Install Node.js
-- Restart terminal / VS Code
+### Mock Provider
 
-uvicorn not recognized:
-- Activate virtual environment
+- Does not call external APIs
+- Does not require API key
+- Useful for development and frontend testing
+- Returns a fixed response
 
-API key errors:
-- Check .env file
-- Restart backend
+### Gemini Provider
 
-Failed to fetch:
-- Backend not running
-- CORS issue
-
-Gemini errors:
-- Quota exceeded
-- Billing not enabled
+- Calls Google Gemini API
+- Requires `GEMINI_API_KEY`
+- Produces real LLM analysis
+- May depend on quota or billing settings
 
 ---
 
-## 🧠 Development Notes
+## Fallback Behavior
 
-- Default provider is mock
-- Backend uses layered architecture:
-  API → Use Case → Service → LLM Provider
+If the selected provider fails:
 
----
-
-## 🔮 Future Improvements
-
-- OpenAI integration
-- NLP-based ambiguity detection
-- Grammarly-like UI highlighting
-- Multi-LLM comparison
+- The system automatically falls back to mock provider
+- `isFallback` becomes `true`
+- Warning and error details are returned in the response
 
 ---
 
-## 👨‍💻 Author
+## Common Issues
 
+### uvicorn is not recognized
+
+Use the virtual environment executable:
+
+```powershell
+.\venv\Scripts\uvicorn.exe main:app --reload
+```
+
+### spaCy model cannot be loaded
+
+Reinstall backend dependencies:
+
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Then verify:
+
+```powershell
+.\venv\Scripts\python.exe -c "import spacy; spacy.load('en_core_web_trf'); print('ok')"
+```
+
+### Failed to fetch
+
+Check:
+
+- Backend is running
+- Frontend is running
+- Backend URL is `http://127.0.0.1:8000`
+- CORS settings include frontend port
+
+### Gemini errors
+
+Check:
+
+- `.env` file exists in backend folder
+- `GEMINI_API_KEY` is correct
+- Backend was restarted after editing `.env`
+- Gemini quota/billing is available
+
+### Frontend build permission error on Windows
+
+If `npm run build` fails with a permission error for `frontend/build`, delete the generated build folder and run build again.
+
+---
+
+## Development Notes
+
+Current simplified backend flow:
+
+```text
+API Controller
+-> AnalysisService
+-> TextProcessingPipeline
+-> version-specific preparation
+-> PromptBuilder
+-> LLM Provider
+-> Response
+```
+
+V2 pre-analysis flow:
+
+```text
+PreAnalysisService
+-> spaCy NLP analysis
+-> KnownAmbiguityDetector
+-> ReferenceAmbiguityDetector
+-> MeasurementAmbiguityDetector
+-> PreAnalysisResult
+```
+
+---
+
+## Future Work
+
+Planned next steps:
+
+- Review V1/V2 prompt fairness
+- V3 type-aware requirement analysis
+- Type-specific ambiguity dimensions
+- Improved frontend comparison between versions
+- Multi-agent feedback/review flow in later versions
