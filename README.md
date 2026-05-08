@@ -60,8 +60,11 @@ Raw text
 V2 pre-analysis detects:
 
 - Known ambiguity terms
+- Linguistic ambiguity candidates
+- Semantic similarity support for NLP-derived candidates
 - Reference ambiguities
 - Measurement ambiguities
+- Measurement context observations
 - Measurable expressions
 
 ---
@@ -75,6 +78,7 @@ V2 pre-analysis detects:
 - Pydantic
 - spaCy
 - spaCy Transformers
+- Transformers
 - Google Gemini API
 - python-dotenv
 
@@ -189,6 +193,14 @@ attribute_ruler
 lemmatizer
 ner
 ```
+
+Cache the semantic similarity model used by V2:
+
+```powershell
+.\venv\Scripts\python.exe -c "from transformers import AutoTokenizer, AutoModel; model='sentence-transformers/all-mpnet-base-v2'; AutoTokenizer.from_pretrained(model); AutoModel.from_pretrained(model); print('semantic model cached')"
+```
+
+V2 can still run if this model is not cached, but semantic similarity findings will be skipped until the model is available locally.
 
 ---
 
@@ -309,7 +321,9 @@ V2 can return:
 - Rejected candidates
 - Reference ambiguities
 - Measurement ambiguities
+- Measurement contexts
 - Measurable expressions
+- Semantic findings
 
 Example:
 
@@ -331,6 +345,15 @@ Measurement ambiguities:
 - loadCondition
 - measurementBoundary
 ```
+
+Measurement context observations are supporting data for the LLM, not direct ambiguity findings. They can include:
+
+- load context, such as `5000 concurrent users`
+- statistical target, such as `average`
+- measured item, such as `average page response`
+- time target, such as `below 2 seconds`
+- related action, such as `process checkout requests`
+- condition phrase, such as `under peak load`
 
 ---
 
@@ -436,6 +459,16 @@ Check:
 - Backend was restarted after editing `.env`
 - Gemini quota/billing is available
 
+### V2 semantic findings are empty
+
+Check whether the semantic similarity model is cached:
+
+```powershell
+.\venv\Scripts\python.exe -c "from transformers import AutoTokenizer, AutoModel; model='sentence-transformers/all-mpnet-base-v2'; AutoTokenizer.from_pretrained(model, local_files_only=True); AutoModel.from_pretrained(model, local_files_only=True); print('semantic model available')"
+```
+
+If it is not available, run the semantic model cache command from the backend setup section.
+
 ### Frontend build permission error on Windows
 
 If `npm run build` fails with a permission error for `frontend/build`, delete the generated build folder and run build again.
@@ -462,9 +495,51 @@ V2 pre-analysis flow:
 PreAnalysisService
 -> spaCy NLP analysis
 -> KnownAmbiguityDetector
+-> LinguisticAmbiguityDetector
+-> SemanticSimilarityAnalyzer
 -> ReferenceAmbiguityDetector
 -> MeasurementAmbiguityDetector
+-> MeasurementContextExtractor
 -> PreAnalysisResult
+```
+
+---
+
+## Updating an Existing Local Copy
+
+If you already cloned the repository before this refactor, update your local copy:
+
+```powershell
+git pull
+```
+
+Then update backend dependencies:
+
+```powershell
+cd backend
+.\venv\Scripts\activate
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Verify or cache the NLP models:
+
+```powershell
+.\venv\Scripts\python.exe -c "import spacy; spacy.load('en_core_web_trf'); print('spacy model available')"
+.\venv\Scripts\python.exe -c "from transformers import AutoTokenizer, AutoModel; model='sentence-transformers/all-mpnet-base-v2'; AutoTokenizer.from_pretrained(model); AutoModel.from_pretrained(model); print('semantic model cached')"
+```
+
+Restart the backend and frontend after updating:
+
+```powershell
+.\venv\Scripts\uvicorn.exe main:app --reload
+```
+
+In a separate terminal:
+
+```powershell
+cd frontend
+npm install
+npm start
 ```
 
 ---
@@ -474,6 +549,7 @@ PreAnalysisService
 Planned next steps:
 
 - Review V1/V2 prompt fairness
+- Evaluate a fine-tuned BERT/transformer model trained on a requirement ambiguity dataset
 - V3 type-aware requirement analysis
 - Type-specific ambiguity dimensions
 - Improved frontend comparison between versions

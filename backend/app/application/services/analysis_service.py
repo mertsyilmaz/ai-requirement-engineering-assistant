@@ -70,6 +70,7 @@ class AnalysisService:
 
             mock_provider = LlmProviderFactory.create("mock")
             raw_response = mock_provider.generate(prompt)
+            provider_error = str(e)
 
             return self._build_response(
                 text=text,
@@ -78,8 +79,8 @@ class AnalysisService:
                 prompt=prompt,
                 pre_analysis=pre_analysis,
                 is_fallback=True,
-                warnings=["Selected provider failed. Mock response returned."],
-                errors=[str(e)],
+                warnings=self._build_fallback_warnings(provider, provider_error),
+                errors=[provider_error],
             )
 
     #---------- <Summary> ----------
@@ -116,6 +117,41 @@ class AnalysisService:
             )
 
         return self.pre_analysis_service
+
+    #---------- <Summary> ----------
+    # Summary: Builds user-facing fallback warnings from provider failure details.
+    #---------- </Summary> ----------
+    def _build_fallback_warnings(self, provider: str, provider_error: str) -> list[str]:
+        warnings = ["Selected provider failed. Mock response returned."]
+
+        if provider.lower().strip() == "gemini" and self._looks_like_quota_error(
+            provider_error,
+        ):
+            warnings.insert(
+                0,
+                "Gemini quota or token limit appears to be reached. Mock response returned instead.",
+            )
+
+        return warnings
+
+    #---------- <Summary> ----------
+    # Summary: Detects common Gemini quota, token, and rate-limit error messages.
+    #---------- </Summary> ----------
+    def _looks_like_quota_error(self, provider_error: str) -> bool:
+        normalized_error = provider_error.lower()
+        quota_markers = {
+            "429",
+            "quota",
+            "rate limit",
+            "ratelimit",
+            "resource exhausted",
+            "token limit",
+            "too many requests",
+            "exceeded",
+            "limit exceeded",
+        }
+
+        return any(marker in normalized_error for marker in quota_markers)
 
     #---------- <Summary> ----------
     # Summary: Builds the API response from parsed LLM output and analysis metadata.
@@ -165,8 +201,10 @@ class AnalysisService:
                     "reason": item.reason,
                     "severity": item.severity,
                     "category": item.category,
-                    "validationRule": item.validation_rule,
                     "sentence": item.sentence,
+                    "source": item.source,
+                    "linguisticRole": item.linguistic_role,
+                    "promptGuidance": item.prompt_guidance,
                 }
                 for item in pre_analysis.ambiguity_candidates
             ],
@@ -179,6 +217,9 @@ class AnalysisService:
                     "category": item.category,
                     "evidence": item.evidence,
                     "sentence": item.sentence,
+                    "source": item.source,
+                    "linguisticRole": item.linguistic_role,
+                    "promptGuidance": item.prompt_guidance,
                 }
                 for item in pre_analysis.confirmed_ambiguities
             ],
@@ -191,6 +232,9 @@ class AnalysisService:
                     "rejectionReason": item.rejection_reason,
                     "supportingExpression": item.supporting_expression,
                     "sentence": item.sentence,
+                    "source": item.source,
+                    "linguisticRole": item.linguistic_role,
+                    "promptGuidance": item.prompt_guidance,
                 }
                 for item in pre_analysis.rejected_ambiguity_candidates
             ],
@@ -217,13 +261,39 @@ class AnalysisService:
                 }
                 for item in pre_analysis.measurement_ambiguities
             ],
+            "measurementContexts": [
+                {
+                    "sentence": item.sentence,
+                    "timeTarget": item.time_target,
+                    "percentageTarget": item.percentage_target,
+                    "percentageSubject": item.percentage_subject,
+                    "countTarget": item.count_target,
+                    "loadContext": item.load_context,
+                    "statisticalTarget": item.statistical_target,
+                    "measuredItem": item.measured_item,
+                    "nearbyAction": item.nearby_action,
+                    "condition": item.condition,
+                }
+                for item in pre_analysis.measurement_contexts
+            ],
             "measurableExpressions": [
                 {
                     "text": item.text,
                     "category": item.category,
-                    "reason": item.reason,
                 }
                 for item in pre_analysis.measurable_expressions
+            ],
+            "semanticFindings": [
+                {
+                    "phrase": item.phrase,
+                    "decision": item.decision,
+                    "semanticLabel": item.semantic_label,
+                    "interpretation": item.interpretation,
+                    "promptGuidance": item.prompt_guidance,
+                    "category": item.category,
+                    "sentence": item.sentence,
+                }
+                for item in pre_analysis.semantic_findings
             ],
             "promptGuidance": pre_analysis.prompt_guidance,
         }

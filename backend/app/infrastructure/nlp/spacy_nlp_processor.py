@@ -5,6 +5,7 @@ from app.domain.pre_analysis import (
     AnalyzedSentence,
     AnalyzedText,
     AnalyzedToken,
+    ExtractedEntity,
     ExtractedNounPhrase,
 )
 
@@ -35,6 +36,11 @@ class SpacyNlpProcessor(NlpProcessorPort):
                         dependency=token.dep_,
                         start_char=token.idx,
                         end_char=token.idx + len(token.text),
+                        morph=token.morph.to_dict(),
+                        head_text=token.head.text,
+                        head_lemma=token.head.lemma_,
+                        head_pos=token.head.pos_,
+                        head_dependency=token.head.dep_,
                     )
                     for token in sentence
                 ],
@@ -53,8 +59,19 @@ class SpacyNlpProcessor(NlpProcessorPort):
             for chunk in doc.noun_chunks
         ]
 
+        entities = [
+            ExtractedEntity(
+                text=entity.text,
+                label=entity.label_,
+                start_char=entity.start_char,
+                end_char=entity.end_char,
+            )
+            for entity in doc.ents
+        ]
+
         return AnalyzedText(
             original_text=text,
             sentences=sentences,
             noun_phrases=noun_phrases,
+            entities=entities,
         )

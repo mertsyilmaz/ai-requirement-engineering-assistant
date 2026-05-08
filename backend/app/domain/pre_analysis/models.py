@@ -3,14 +3,22 @@ from typing import Literal
 
 
 Severity = Literal["low", "medium", "high"]
-MatchType = Literal["phrase", "regex"]
+FindingSource = Literal[
+    "knownKnowledge",
+    "linguisticAnalysis",
+    "semanticValidation",
+    "measurementAnalysis",
+    "referenceAnalysis",
+]
 AmbiguityStatus = Literal[
     "candidate",
     "confirmed",
     "rejected",
     "reference",
     "measurement",
+    "semantic",
 ]
+SemanticDecision = Literal["confirmed", "excluded", "uncertain"]
 MeasurableExpressionCategory = Literal[
     "time",
     "percentage",
@@ -33,6 +41,11 @@ class AnalyzedToken:
     dependency: str
     start_char: int
     end_char: int
+    morph: dict[str, str] = field(default_factory=dict)
+    head_text: str | None = None
+    head_lemma: str | None = None
+    head_pos: str | None = None
+    head_dependency: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +75,18 @@ class ExtractedNounPhrase:
 
 @dataclass(frozen=True)
 #---------- <Summary> ----------
+# Summary: Named entity extracted by spaCy NER from the requirement text.
+#---------- </Summary> ----------
+class ExtractedEntity:
+
+    text: str
+    label: str
+    start_char: int
+    end_char: int
+
+
+@dataclass(frozen=True)
+#---------- <Summary> ----------
 # Summary: Structured NLP analysis result for a cleaned requirement text.
 #---------- </Summary> ----------
 class AnalyzedText:
@@ -69,6 +94,7 @@ class AnalyzedText:
     original_text: str
     sentences: list[AnalyzedSentence] = field(default_factory=list)
     noun_phrases: list[ExtractedNounPhrase] = field(default_factory=list)
+    entities: list[ExtractedEntity] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -81,7 +107,6 @@ class MeasurableExpression:
     category: MeasurableExpressionCategory
     start_char: int
     end_char: int
-    reason: str
 
 
 @dataclass(frozen=True)
@@ -91,11 +116,8 @@ class MeasurableExpression:
 class AmbiguityTerm:
 
     phrase: str
-    reason: str
     severity: Severity
     category: str
-    match_type: MatchType = "phrase"
-    validation_rule: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,11 +131,12 @@ class AmbiguityCandidate:
     reason: str
     severity: Severity
     category: str
-    match_type: MatchType
     start_char: int
     end_char: int
     sentence: str
-    validation_rule: str | None = None
+    source: FindingSource = "knownKnowledge"
+    linguistic_role: str | None = None
+    prompt_guidance: str | None = None
     status: AmbiguityStatus = "candidate"
 
 
@@ -132,6 +155,9 @@ class ConfirmedAmbiguity:
     end_char: int
     sentence: str
     evidence: str
+    source: FindingSource = "knownKnowledge"
+    linguistic_role: str | None = None
+    prompt_guidance: str | None = None
     status: AmbiguityStatus = "confirmed"
 
 
@@ -150,6 +176,9 @@ class RejectedAmbiguityCandidate:
     sentence: str
     rejection_reason: str
     supporting_expression: str | None = None
+    source: FindingSource = "knownKnowledge"
+    linguistic_role: str | None = None
+    prompt_guidance: str | None = None
     status: AmbiguityStatus = "rejected"
 
 
@@ -190,15 +219,39 @@ class MeasurementAmbiguity:
 
 @dataclass(frozen=True)
 #---------- <Summary> ----------
-# Summary: Configuration loaded from JSON for a rule-based ambiguity detector.
+# Summary: Structural measurement context extracted for LLM support, not as a direct ambiguity.
 #---------- </Summary> ----------
-class ReferenceAmbiguityRuleConfig:
+class MeasurementContext:
 
-    rule_name: str
-    terms: list[str]
-    reason: str
-    severity: Severity
+    sentence: str
+    time_target: str | None = None
+    percentage_target: str | None = None
+    percentage_subject: str | None = None
+    count_target: str | None = None
+    load_context: str | None = None
+    statistical_target: str | None = None
+    measured_item: str | None = None
+    nearby_action: str | None = None
+    condition: str | None = None
+
+
+@dataclass(frozen=True)
+#---------- <Summary> ----------
+# Summary: Semantic interpretation used to support or exclude ambiguity candidates.
+#---------- </Summary> ----------
+class SemanticAmbiguityFinding:
+
+    phrase: str
+    decision: SemanticDecision
+    semantic_label: str
+    interpretation: str
+    prompt_guidance: str
     category: str
+    start_char: int
+    end_char: int
+    sentence: str
+    source: FindingSource = "semanticValidation"
+    status: AmbiguityStatus = "semantic"
 
 
 @dataclass(frozen=True)
@@ -216,4 +269,6 @@ class PreAnalysisResult:
     rejected_ambiguity_candidates: list[RejectedAmbiguityCandidate] = field(default_factory=list)
     reference_ambiguities: list[ReferenceAmbiguity] = field(default_factory=list)
     measurement_ambiguities: list[MeasurementAmbiguity] = field(default_factory=list)
+    measurement_contexts: list[MeasurementContext] = field(default_factory=list)
+    semantic_findings: list[SemanticAmbiguityFinding] = field(default_factory=list)
     prompt_guidance: list[str] = field(default_factory=list)

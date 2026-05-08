@@ -41,8 +41,10 @@ class PreAnalysisAmbiguityCandidateItem(BaseModel):
     reason: str
     severity: str
     category: str
-    validationRule: str | None
     sentence: str
+    source: str
+    linguisticRole: str | None
+    promptGuidance: str | None
 
 
 #---------- <Summary> ----------
@@ -57,6 +59,9 @@ class PreAnalysisConfirmedAmbiguityItem(BaseModel):
     category: str
     evidence: str
     sentence: str
+    source: str
+    linguisticRole: str | None
+    promptGuidance: str | None
 
 
 #---------- <Summary> ----------
@@ -71,6 +76,9 @@ class PreAnalysisRejectedAmbiguityCandidateItem(BaseModel):
     rejectionReason: str
     supportingExpression: str | None
     sentence: str
+    source: str
+    linguisticRole: str | None
+    promptGuidance: str | None
 
 
 #---------- <Summary> ----------
@@ -101,13 +109,43 @@ class PreAnalysisMeasurementAmbiguityItem(BaseModel):
 
 
 #---------- <Summary> ----------
+# Summary: Structural measurement context sent as supporting pre-analysis information.
+#---------- </Summary> ----------
+class PreAnalysisMeasurementContextItem(BaseModel):
+
+    sentence: str
+    timeTarget: str | None
+    percentageTarget: str | None
+    percentageSubject: str | None
+    countTarget: str | None
+    loadContext: str | None
+    statisticalTarget: str | None
+    measuredItem: str | None
+    nearbyAction: str | None
+    condition: str | None
+
+
+#---------- <Summary> ----------
 # Summary: Measurable expression found in the requirement text.
 #---------- </Summary> ----------
 class PreAnalysisMeasurableExpressionItem(BaseModel):
 
     text: str
     category: str
-    reason: str
+
+
+#---------- <Summary> ----------
+# Summary: Semantic similarity support produced by the NLP pre-analysis layer.
+#---------- </Summary> ----------
+class PreAnalysisSemanticFindingItem(BaseModel):
+
+    phrase: str
+    decision: str
+    semanticLabel: str
+    interpretation: str
+    promptGuidance: str
+    category: str
+    sentence: str
 
 
 #---------- <Summary> ----------
@@ -121,7 +159,9 @@ class PreAnalysisInfo(BaseModel):
     rejectedAmbiguityCandidates: list[PreAnalysisRejectedAmbiguityCandidateItem]
     referenceAmbiguities: list[PreAnalysisReferenceAmbiguityItem]
     measurementAmbiguities: list[PreAnalysisMeasurementAmbiguityItem]
+    measurementContexts: list[PreAnalysisMeasurementContextItem]
     measurableExpressions: list[PreAnalysisMeasurableExpressionItem]
+    semanticFindings: list[PreAnalysisSemanticFindingItem]
     promptGuidance: list[str]
 
 

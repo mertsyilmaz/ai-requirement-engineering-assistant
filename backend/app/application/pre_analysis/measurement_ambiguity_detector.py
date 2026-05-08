@@ -1,18 +1,19 @@
-import re
-
 from app.domain.pre_analysis import (
     AnalyzedSentence,
     AnalyzedText,
+    ExtractedEntity,
     MeasurableExpression,
     MeasurementAmbiguity,
 )
 
 
 #---------- <Summary> ----------
-# Summary: Detects measurable expressions and missing measurement details.
+# Summary: Detects measurable expressions and missing measurement details with NLP context.
 #
-# A measurable expression can still be ambiguous when it lacks context such as
-# load condition, statistical target, measurement boundary, or application scope.
+# This detector uses spaCy entities, token context, and sentence structure
+# instead of maintaining separate regex pattern JSON files. It treats measurable
+# values as useful but checks whether they still miss statistical, load, or
+# measurement-boundary context.
 #---------- </Summary> ----------
 class MeasurementAmbiguityDetector:
 
@@ -24,7 +25,7 @@ class MeasurementAmbiguityDetector:
         text: str,
         analyzed_text: AnalyzedText,
     ) -> tuple[list[MeasurableExpression], list[MeasurementAmbiguity]]:
-        expressions = self._detect_measurable_expressions(text)
+        expressions = self._detect_measurable_expressions(analyzed_text)
         ambiguities = self._detect_measurement_ambiguities(
             expressions,
             analyzed_text,
@@ -33,24 +34,99 @@ class MeasurementAmbiguityDetector:
         return expressions, ambiguities
 
     #---------- <Summary> ----------
-    # Summary: Finds concrete time, count, percentage, frequency, and size expressions.
+    # Summary: Converts spaCy measurable entities into pre-analysis expressions.
     #---------- </Summary> ----------
-    def _detect_measurable_expressions(self, text: str) -> list[MeasurableExpression]:
+    def _detect_measurable_expressions(
+        self,
+        analyzed_text: AnalyzedText,
+    ) -> list[MeasurableExpression]:
         expressions: list[MeasurableExpression] = []
 
-        for pattern, category, reason in self._patterns():
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                expressions.append(
-                    MeasurableExpression(
-                        text=match.group(0),
-                        category=category,
-                        start_char=match.start(),
-                        end_char=match.end(),
-                        reason=reason,
-                    )
-                )
+        for entity in analyzed_text.entities:
+            category = self._category_for_entity(entity)
+            if not category:
+                continue
 
-        return self._remove_overlapping(self._deduplicate(expressions))
+            sentence = self._find_sentence_for_range(
+                analyzed_text,
+                entity.start_char,
+                entity.end_char,
+            )
+            start_char = self._expanded_start_char(entity, sentence, category)
+            expression_text = analyzed_text.original_text[start_char:entity.end_char]
+
+            expressions.append(
+                MeasurableExpression(
+                    text=expression_text,
+                    category=category,
+                    start_char=start_char,
+                    end_char=entity.end_char,
+                )
+            )
+
+        return self._deduplicate(expressions)
+
+    #---------- <Summary> ----------
+    # Summary: Maps spaCy entity labels to requirement measurement categories.
+    #---------- </Summary> ----------
+    def _category_for_entity(self, entity: ExtractedEntity) -> str | None:
+        if entity.label in {"TIME", "DATE"}:
+            if self._is_frequency_expression(entity.text):
+                return "frequency"
+
+            return "time"
+
+        if entity.label == "PERCENT":
+            return "percentage"
+
+        if entity.label in {"QUANTITY", "MONEY"}:
+            return "size"
+
+        if entity.label == "CARDINAL":
+            return "count"
+
+        return None
+
+    #---------- <Summary> ----------
+    # Summary: Detects recurring interval wording from a measurable time entity.
+    #---------- </Summary> ----------
+    def _is_frequency_expression(self, text: str) -> bool:
+        normalized_text = text.lower().strip()
+
+        return normalized_text.startswith("every ") or normalized_text.startswith("per ") or normalized_text in {
+            "daily",
+            "weekly",
+            "monthly",
+            "yearly",
+            "annually",
+            "hourly",
+        }
+
+    #---------- <Summary> ----------
+    # Summary: Includes a nearby preposition such as "within" when spaCy marks only the value.
+    #---------- </Summary> ----------
+    def _expanded_start_char(
+        self,
+        entity: ExtractedEntity,
+        sentence: AnalyzedSentence,
+        category: str,
+    ) -> int:
+        if category != "time":
+            return entity.start_char
+
+        previous_token = None
+
+        for token in sentence.tokens:
+            if token.end_char <= entity.start_char:
+                previous_token = token
+                continue
+
+            break
+
+        if previous_token and previous_token.pos == "ADP":
+            return previous_token.start_char
+
+        return entity.start_char
 
     #---------- <Summary> ----------
     # Summary: Checks each measurable expression for missing requirement dimensions.
@@ -67,12 +143,11 @@ class MeasurementAmbiguityDetector:
 
             if expression.category == "time":
                 ambiguities.extend(
-                    self._detect_time_measurement_gaps(expression, sentence)
-                )
-
-            if expression.category in {"count", "percentage"}:
-                ambiguities.extend(
-                    self._detect_volume_or_percentage_gaps(expression, sentence)
+                    self._detect_time_measurement_gaps(
+                        expression,
+                        sentence,
+                        expressions,
+                    )
                 )
 
         return ambiguities
@@ -84,44 +159,45 @@ class MeasurementAmbiguityDetector:
         self,
         expression: MeasurableExpression,
         sentence: AnalyzedSentence,
+        expressions: list[MeasurableExpression],
     ) -> list[MeasurementAmbiguity]:
         gaps: list[MeasurementAmbiguity] = []
-        sentence_text = sentence.text.lower()
 
-        if not self._has_statistical_target(sentence_text):
+        if not self._is_performance_time_target(expression, sentence):
+            return gaps
+
+        if not self._has_statistical_target(sentence, expressions):
             gaps.append(
                 self._build_measurement_ambiguity(
                     expression,
                     sentence,
                     missing_dimension="statisticalTarget",
                     reason="The time target does not specify whether it is a maximum, average, median, or percentile-based target.",
-                    evidence="No statistical qualifier such as maximum, average, median, 95th percentile, or 99th percentile was found near the time expression.",
+                    evidence="No percentage, ordinal percentile, or statistical qualifier was found in the same measurement sentence.",
                     severity="medium",
                 )
             )
 
-        if not self._has_load_condition(sentence_text):
+        if not self._has_load_condition(sentence, expression, expressions):
             gaps.append(
                 self._build_measurement_ambiguity(
                     expression,
                     sentence,
                     missing_dimension="loadCondition",
                     reason="The time target does not specify the load or operating condition under which it must be met.",
-                    evidence="No load context such as concurrent users, requests per second, peak load, or normal load was found near the time expression.",
+                    evidence="No condition phrase was found after the measurable time expression.",
                     severity="medium",
                 )
             )
 
-        if self._has_generic_measurement_action(sentence) and not self._has_boundary_context(
-            sentence_text
-        ):
+        if not self._has_measurement_boundary(sentence, expression, expressions):
             gaps.append(
                 self._build_measurement_ambiguity(
                     expression,
                     sentence,
                     missing_dimension="measurementBoundary",
                     reason="The requirement does not clearly define when the measured operation starts and ends.",
-                    evidence="A generic measured action was found, but no boundary context such as after, when, until, displayed, rendered, completed, or available was found.",
+                    evidence="The sentence contains a time target but does not provide enough surrounding measurement context to infer the measured boundary.",
                     severity="high",
                 )
             )
@@ -129,155 +205,171 @@ class MeasurementAmbiguityDetector:
         return gaps
 
     #---------- <Summary> ----------
-    # Summary: Finds missing condition or scope around count and percentage expressions.
+    # Summary: Uses percentage expressions or percentile wording as statistical context.
     #---------- </Summary> ----------
-    def _detect_volume_or_percentage_gaps(
+    def _has_statistical_target(
+        self,
+        sentence: AnalyzedSentence,
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        if any(
+            expression.category == "percentage"
+            and expression.text in sentence.text
+            for expression in expressions
+        ):
+            return True
+
+        return any(
+            (
+                token.pos in {"NOUN", "PROPN"}
+                and "percentile" in token.lemma.lower()
+            )
+            or token.lemma.lower() in {"average", "median", "maximum", "minimum"}
+            for token in sentence.tokens
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Detects operating context from prepositional phrases after the time target.
+    #---------- </Summary> ----------
+    def _has_load_condition(
+        self,
+        sentence: AnalyzedSentence,
+        expression: MeasurableExpression,
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        if any(
+            measurable_expression.category == "count"
+            and measurable_expression.start_char < expression.start_char
+            and measurable_expression.text in sentence.text
+            for measurable_expression in expressions
+        ):
+            return True
+
+        for token in sentence.tokens:
+            if token.start_char < expression.end_char:
+                continue
+
+            if token.text.lower() in {"for", "of", "to"}:
+                continue
+
+            if token.pos == "ADP" and self._prepositional_phrase_has_load_context(
+                    sentence,
+                    token.start_char,
+                    expressions,
+            ):
+                return True
+
+        return False
+
+    #---------- <Summary> ----------
+    # Summary: Keeps measurement-gap checks focused on performance-style time targets.
+    #---------- </Summary> ----------
+    def _is_performance_time_target(
         self,
         expression: MeasurableExpression,
         sentence: AnalyzedSentence,
-    ) -> list[MeasurementAmbiguity]:
-        sentence_text = sentence.text.lower()
+    ) -> bool:
+        leading_token = self._find_first_token_in_expression(sentence, expression)
+        if leading_token and leading_token.text.lower() == "after":
+            return False
 
-        if self._has_condition_context(sentence_text):
-            return []
-
-        return [
-            self._build_measurement_ambiguity(
-                expression,
-                sentence,
-                missing_dimension="conditionContext",
-                reason="The measurable target does not specify the condition or scope where it applies.",
-                evidence="The measurable expression was found without condition context such as under, during, when, for, or per.",
-                severity="medium",
-            )
-        ]
+        return True
 
     #---------- <Summary> ----------
-    # Summary: Defines regex patterns for measurable expressions used by V2 pre-analysis.
+    # Summary: Finds the first sentence token that belongs to a measurable expression.
     #---------- </Summary> ----------
-    def _patterns(self) -> list[tuple[str, str, str]]:
-        return [
-            (
-                r"\bwithin\s+\d+(\.\d+)?\s*(ms|milliseconds?|seconds?|secs?|minutes?|mins?|hours?)\b",
-                "time",
-                "Defines a measurable upper time limit.",
-            ),
-            (
-                r"\b(less than|under|below|no more than|maximum of|max)\s+\d+(\.\d+)?\s*(ms|milliseconds?|seconds?|secs?|minutes?|mins?|hours?)\b",
-                "time",
-                "Defines a measurable maximum time threshold.",
-            ),
-            (
-                r"\b(at least|minimum of|min)\s+\d+(\.\d+)?\s*(%|percent|percentage)\b",
-                "percentage",
-                "Defines a measurable minimum percentage.",
-            ),
-            (
-                r"\b(less than|under|below|no more than|maximum of|max)\s+\d+(\.\d+)?\s*(%|percent|percentage)\b",
-                "percentage",
-                "Defines a measurable maximum percentage.",
-            ),
-            (
-                r"\b\d+(\.\d+)?\s*(%|percent|percentage)\b",
-                "percentage",
-                "Defines a measurable percentage.",
-            ),
-            (
-                r"\b(at least|minimum of|min|more than|over)\s+\d+\s+(users?|requests?|transactions?|records?|items?|files?|attempts?)\b",
-                "count",
-                "Defines a measurable minimum count.",
-            ),
-            (
-                r"\b(less than|under|below|no more than|maximum of|max)\s+\d+\s+(users?|requests?|transactions?|records?|items?|files?|attempts?)\b",
-                "count",
-                "Defines a measurable maximum count.",
-            ),
-            (
-                r"\b\d+\s+(users?|requests?|transactions?|records?|items?|files?|attempts?)\b",
-                "count",
-                "Defines a measurable count.",
-            ),
-            (
-                r"\b(per|every)\s+\d+(\.\d+)?\s*(ms|milliseconds?|seconds?|secs?|minutes?|mins?|hours?|days?)\b",
-                "frequency",
-                "Defines a measurable frequency.",
-            ),
-            (
-                r"\b\d+(\.\d+)?\s*(kb|mb|gb|tb|kilobytes?|megabytes?|gigabytes?|terabytes?)\b",
-                "size",
-                "Defines a measurable size.",
-            ),
-        ]
-
-    #---------- <Summary> ----------
-    # Summary: Removes duplicate measurable expressions found by overlapping patterns.
-    #---------- </Summary> ----------
-    def _deduplicate(
+    def _find_first_token_in_expression(
         self,
-        expressions: list[MeasurableExpression],
-    ) -> list[MeasurableExpression]:
-        unique: dict[tuple[int, int, str], MeasurableExpression] = {}
-
-        for expression in expressions:
-            key = (
-                expression.start_char,
-                expression.end_char,
-                expression.category,
-            )
-            unique[key] = expression
-
-        return list(unique.values())
-
-    #---------- <Summary> ----------
-    # Summary: Keeps the longest useful expression when regex matches overlap.
-    #---------- </Summary> ----------
-    def _remove_overlapping(
-        self,
-        expressions: list[MeasurableExpression],
-    ) -> list[MeasurableExpression]:
-        sorted_expressions = sorted(
-            expressions,
-            key=lambda expression: (
-                expression.start_char,
-                -(expression.end_char - expression.start_char),
-            ),
-        )
-
-        selected: list[MeasurableExpression] = []
-
-        for expression in sorted_expressions:
-            overlaps_existing = any(
-                expression.start_char < selected_expression.end_char
-                and expression.end_char > selected_expression.start_char
-                for selected_expression in selected
-            )
-
-            if not overlaps_existing:
-                selected.append(expression)
-
-        return selected
-
-    #---------- <Summary> ----------
-    # Summary: Finds the analyzed sentence that contains a measurable expression.
-    #---------- </Summary> ----------
-    def _find_sentence_for_expression(
-        self,
-        analyzed_text: AnalyzedText,
+        sentence: AnalyzedSentence,
         expression: MeasurableExpression,
-    ) -> AnalyzedSentence:
-        for sentence in analyzed_text.sentences:
-            if (
-                sentence.start_char <= expression.start_char
-                and expression.end_char <= sentence.end_char
-            ):
-                return sentence
+    ):
+        for token in sentence.tokens:
+            if token.start_char == expression.start_char:
+                return token
 
-        return AnalyzedSentence(
-            text=analyzed_text.original_text,
-            start_char=0,
-            end_char=len(analyzed_text.original_text),
-            tokens=[],
+        return None
+
+    #---------- <Summary> ----------
+    # Summary: Checks whether a post-measurement phrase describes operating load.
+    #---------- </Summary> ----------
+    def _prepositional_phrase_has_load_context(
+        self,
+        sentence: AnalyzedSentence,
+        preposition_start_char: int,
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        later_tokens = [
+            token
+            for token in sentence.tokens
+            if token.start_char > preposition_start_char
+        ]
+
+        if any(
+            token.lemma.lower() in {
+                "load",
+                "traffic",
+                "condition",
+                "environment",
+                "capacity",
+            }
+            for token in later_tokens
+        ):
+            return True
+
+        if any(
+            token.pos in {"NOUN", "PROPN", "NUM"}
+            for token in later_tokens
+        ):
+            return True
+
+        return any(
+            expression.category == "count"
+            and expression.start_char > preposition_start_char
+            and expression.text in sentence.text
+            for expression in expressions
         )
+
+    #---------- <Summary> ----------
+    # Summary: Infers whether the sentence gives enough context for measurement boundaries.
+    #---------- </Summary> ----------
+    def _has_measurement_boundary(
+        self,
+        sentence: AnalyzedSentence,
+        expression: MeasurableExpression,
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        if self._has_statistical_target(sentence, expressions) and self._has_load_condition(
+            sentence,
+            expression,
+            expressions,
+        ):
+            return True
+
+        content_verbs = [
+            token
+            for token in sentence.tokens
+            if token.pos == "VERB"
+        ]
+        concrete_nouns = [
+            token
+            for token in sentence.tokens
+            if token.pos in {"NOUN", "PROPN"}
+            and token.dependency in {"nsubj", "dobj", "pobj", "attr"}
+        ]
+
+        measured_objects = [
+            token
+            for token in sentence.tokens
+            if (
+                token.start_char < expression.start_char
+                and token.pos in {"NOUN", "PROPN"}
+                and token.dependency in {"dobj", "pobj", "attr"}
+            )
+        ]
+        if content_verbs and measured_objects:
+            return True
+
+        return len(content_verbs) >= 2 and len(concrete_nouns) >= 2
 
     #---------- <Summary> ----------
     # Summary: Creates a measurement ambiguity for one missing measurement dimension.
@@ -304,103 +396,54 @@ class MeasurementAmbiguityDetector:
         )
 
     #---------- <Summary> ----------
-    # Summary: Checks whether the sentence defines max/average/median/percentile context.
+    # Summary: Finds the analyzed sentence that contains a measurable expression.
     #---------- </Summary> ----------
-    def _has_statistical_target(self, sentence_text: str) -> bool:
-        return any(
-            marker in sentence_text
-            for marker in {
-                "maximum",
-                "max",
-                "average",
-                "avg",
-                "median",
-                "percentile",
-                "95th",
-                "99th",
-                "p95",
-                "p99",
-                "for 95%",
-                "for 99%",
-            }
+    def _find_sentence_for_expression(
+        self,
+        analyzed_text: AnalyzedText,
+        expression: MeasurableExpression,
+    ) -> AnalyzedSentence:
+        return self._find_sentence_for_range(
+            analyzed_text,
+            expression.start_char,
+            expression.end_char,
         )
 
     #---------- <Summary> ----------
-    # Summary: Checks whether the sentence defines load or operating conditions.
+    # Summary: Finds the analyzed sentence that contains a character range.
     #---------- </Summary> ----------
-    def _has_load_condition(self, sentence_text: str) -> bool:
-        return any(
-            marker in sentence_text
-            for marker in {
-                "concurrent user",
-                "concurrent users",
-                "requests per second",
-                "transactions per second",
-                "peak load",
-                "normal load",
-                "under load",
-                "under typical load",
-                "under peak load",
-                "users",
-                "requests",
-            }
+    def _find_sentence_for_range(
+        self,
+        analyzed_text: AnalyzedText,
+        start_char: int,
+        end_char: int,
+    ) -> AnalyzedSentence:
+        for sentence in analyzed_text.sentences:
+            if sentence.start_char <= start_char and end_char <= sentence.end_char:
+                return sentence
+
+        return AnalyzedSentence(
+            text=analyzed_text.original_text,
+            start_char=0,
+            end_char=len(analyzed_text.original_text),
+            tokens=[],
         )
 
     #---------- <Summary> ----------
-    # Summary: Checks whether the sentence gives start/end clues for the measurement.
+    # Summary: Removes duplicate measurable expressions created from overlapping entities.
     #---------- </Summary> ----------
-    def _has_boundary_context(self, sentence_text: str) -> bool:
-        return any(
-            marker in sentence_text
-            for marker in {
-                "after",
-                "when",
-                "until",
-                "complete",
-                "completed",
-                "display",
-                "displayed",
-                "render",
-                "rendered",
-                "available",
-                "visible",
-            }
-        )
+    def _deduplicate(
+        self,
+        expressions: list[MeasurableExpression],
+    ) -> list[MeasurableExpression]:
+        unique: dict[tuple[int, int, str], MeasurableExpression] = {}
 
-    #---------- <Summary> ----------
-    # Summary: Checks whether count/percentage measurements include condition context.
-    #---------- </Summary> ----------
-    def _has_condition_context(self, sentence_text: str) -> bool:
-        return any(
-            marker in sentence_text
-            for marker in {
-                "under",
-                "during",
-                "when",
-                "while",
-                "for",
-                "per",
-                "at",
-            }
-        )
+        for expression in expressions:
+            key = (
+                expression.start_char,
+                expression.end_char,
+                expression.category,
+            )
+            unique[key] = expression
 
-    #---------- <Summary> ----------
-    # Summary: Checks whether the measured action is generic enough to need boundaries.
-    #---------- </Summary> ----------
-    def _has_generic_measurement_action(self, sentence: AnalyzedSentence) -> bool:
-        generic_actions = {
-            "respond",
-            "process",
-            "complete",
-            "load",
-            "display",
-            "render",
-            "show",
-            "retrieve",
-            "return",
-        }
-
-        return any(
-            token.lemma.lower() in generic_actions and token.pos in {"VERB", "AUX"}
-            for token in sentence.tokens
-        )
+        return list(unique.values())

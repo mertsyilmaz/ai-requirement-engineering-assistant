@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 
 
 #---------- <Summary> ----------
@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 #---------- </Summary> ----------
 class AnalyzeRequest(BaseModel):
 
-    text: str = Field(..., min_length=5)
+    text: str
     provider: str = "mock"
     analysisVersion: str = "v1"
 

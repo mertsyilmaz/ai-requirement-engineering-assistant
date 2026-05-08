@@ -6,7 +6,9 @@ from app.application.ports.ambiguity_knowledge_repository import (
 from app.domain.pre_analysis import (
     AmbiguityCandidate,
     AmbiguityTerm,
+    AnalyzedSentence,
     AnalyzedText,
+    AnalyzedToken,
     ConfirmedAmbiguity,
     MeasurableExpression,
     RejectedAmbiguityCandidate,
@@ -14,11 +16,11 @@ from app.domain.pre_analysis import (
 
 
 #---------- <Summary> ----------
-# Summary: Detects known ambiguity terms defined in the ambiguity knowledge source.
-# 
-# This detector handles the full known-ambiguity flow:
-# it reads configured terms, finds matches in the requirement text, and decides
-# whether each match should be confirmed or rejected based on measurable context.
+# Summary: Detects known ambiguity terms from seed knowledge without regex rules.
+#
+# The JSON file only provides seed phrases and broad categories. Matching and
+# validation use spaCy token, lemma, sentence, and dependency context so the
+# detector is not driven by hidden pattern lists.
 #---------- </Summary> ----------
 class KnownAmbiguityDetector:
 
@@ -26,7 +28,7 @@ class KnownAmbiguityDetector:
         self.ambiguity_repository = ambiguity_repository
 
     #---------- <Summary> ----------
-    # Summary: Returns all known ambiguity candidates plus confirmed/rejected decisions.
+    # Summary: Returns known ambiguity candidates plus confirmed/rejected decisions.
     #---------- </Summary> ----------
     def detect(
         self,
@@ -38,162 +40,327 @@ class KnownAmbiguityDetector:
         list[ConfirmedAmbiguity],
         list[RejectedAmbiguityCandidate],
     ]:
-        candidates = self._find_candidates(text, analyzed_text)
+        candidates = self._remove_overlapping_candidates(
+            self._find_candidates(analyzed_text)
+        )
         confirmed: list[ConfirmedAmbiguity] = []
         rejected: list[RejectedAmbiguityCandidate] = []
 
         for candidate in candidates:
-            if self._should_reject(candidate, measurable_expressions):
+            domain_object_reason = self._get_domain_object_rejection(candidate)
+            if domain_object_reason:
+                rejected.append(
+                    self._build_rejected_candidate(
+                        candidate,
+                        measurable_expressions,
+                        domain_object_reason,
+                    )
+                )
+                continue
+
+            if self._is_clarified_by_measurement(candidate, measurable_expressions):
                 rejected.append(
                     self._build_rejected_candidate(candidate, measurable_expressions)
                 )
-            else:
-                confirmed.append(self._build_confirmed_ambiguity(candidate))
+                continue
+
+            confirmed.append(self._build_confirmed_ambiguity(candidate))
 
         return candidates, confirmed, rejected
 
     #---------- <Summary> ----------
-    # Summary: Finds all configured ambiguity terms in the cleaned requirement text.
+    # Summary: Finds seed phrases by comparing JSON terms with spaCy token text and lemmas.
     #---------- </Summary> ----------
-    def _find_candidates(
-        self,
-        text: str,
-        analyzed_text: AnalyzedText,
-    ) -> list[AmbiguityCandidate]:
+    def _find_candidates(self, analyzed_text: AnalyzedText) -> list[AmbiguityCandidate]:
         candidates: list[AmbiguityCandidate] = []
 
         for term in self.ambiguity_repository.get_all_terms():
-            candidates.extend(self._find_matches(text, analyzed_text, term))
+            term_parts = self._normalize_phrase_parts(term.phrase)
+
+            for sentence in analyzed_text.sentences:
+                tokens = [token for token in sentence.tokens if token.text.strip()]
+
+                for index in range(0, len(tokens) - len(term_parts) + 1):
+                    window = tokens[index:index + len(term_parts)]
+
+                    if not self._tokens_match_phrase(window, term_parts):
+                        continue
+
+                    candidates.append(
+                        self._build_candidate_from_tokens(window, sentence, term)
+                    )
 
         return candidates
 
     #---------- <Summary> ----------
-    # Summary: Chooses phrase or regex matching based on the term configuration.
+    # Summary: Keeps the longest seed phrase when known ambiguity matches overlap.
     #---------- </Summary> ----------
-    def _find_matches(
+    def _remove_overlapping_candidates(
         self,
-        text: str,
-        analyzed_text: AnalyzedText,
-        term: AmbiguityTerm,
+        candidates: list[AmbiguityCandidate],
     ) -> list[AmbiguityCandidate]:
-        if term.match_type == "regex":
-            return self._find_regex_matches(text, analyzed_text, term)
-
-        return self._find_phrase_matches(text, analyzed_text, term)
-
-    #---------- <Summary> ----------
-    # Summary: Finds exact phrase matches without matching inside longer words.
-    #---------- </Summary> ----------
-    def _find_phrase_matches(
-        self,
-        text: str,
-        analyzed_text: AnalyzedText,
-        term: AmbiguityTerm,
-    ) -> list[AmbiguityCandidate]:
-        pattern = re.compile(rf"\b{re.escape(term.phrase)}\b", re.IGNORECASE)
-
-        return [
-            self._build_candidate(match, analyzed_text, term)
-            for match in pattern.finditer(text)
-        ]
-
-    #---------- <Summary> ----------
-    # Summary: Finds pattern-based matches for terms configured as regular expressions.
-    #---------- </Summary> ----------
-    def _find_regex_matches(
-        self,
-        text: str,
-        analyzed_text: AnalyzedText,
-        term: AmbiguityTerm,
-    ) -> list[AmbiguityCandidate]:
-        pattern = re.compile(term.phrase, re.IGNORECASE)
-
-        return [
-            self._build_candidate(match, analyzed_text, term)
-            for match in pattern.finditer(text)
-        ]
-
-    #---------- <Summary> ----------
-    # Summary: Converts a text match into a candidate object used by later analysis.
-    #---------- </Summary> ----------
-    def _build_candidate(
-        self,
-        match: re.Match,
-        analyzed_text: AnalyzedText,
-        term: AmbiguityTerm,
-    ) -> AmbiguityCandidate:
-        return AmbiguityCandidate(
-            phrase=term.phrase,
-            matched_text=match.group(0),
-            reason=term.reason,
-            severity=term.severity,
-            category=term.category,
-            match_type=term.match_type,
-            start_char=match.start(),
-            end_char=match.end(),
-            sentence=self._find_sentence_for_match(
-                analyzed_text,
-                match.start(),
-                match.end(),
+        selected: list[AmbiguityCandidate] = []
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda candidate: (
+                candidate.start_char,
+                -(candidate.end_char - candidate.start_char),
             ),
-            validation_rule=term.validation_rule,
+        )
+
+        for candidate in sorted_candidates:
+            if any(
+                candidate.start_char < selected_candidate.end_char
+                and candidate.end_char > selected_candidate.start_char
+                for selected_candidate in selected
+            ):
+                continue
+
+            selected.append(candidate)
+
+        return self._remove_modifier_duplicates(selected)
+
+    #---------- <Summary> ----------
+    # Summary: Removes adverb candidates when they only modify another selected candidate.
+    #---------- </Summary> ----------
+    def _remove_modifier_duplicates(
+        self,
+        candidates: list[AmbiguityCandidate],
+    ) -> list[AmbiguityCandidate]:
+        filtered: list[AmbiguityCandidate] = []
+
+        for candidate in candidates:
+            if not self._is_adverb_modifier_of_candidate(candidate, candidates):
+                filtered.append(candidate)
+
+        return filtered
+
+    #---------- <Summary> ----------
+    # Summary: Checks whether an adverb candidate points to another candidate as its head.
+    #---------- </Summary> ----------
+    def _is_adverb_modifier_of_candidate(
+        self,
+        candidate: AmbiguityCandidate,
+        candidates: list[AmbiguityCandidate],
+    ) -> bool:
+        role = candidate.linguistic_role or ""
+        if "used as ADV" not in role:
+            return False
+
+        head_match = re.search(r"depends on '([^']+)'", role)
+        if not head_match:
+            return False
+
+        head_text = head_match.group(1).lower()
+
+        return any(
+            other is not candidate
+            and other.sentence == candidate.sentence
+            and other.category == candidate.category
+            and other.matched_text.lower() == head_text
+            for other in candidates
         )
 
     #---------- <Summary> ----------
-    # Summary: Finds the analyzed sentence that contains the matched ambiguity term.
+    # Summary: Normalizes one configured phrase into comparable token parts.
     #---------- </Summary> ----------
-    def _find_sentence_for_match(
-        self,
-        analyzed_text: AnalyzedText,
-        start_char: int,
-        end_char: int,
-    ) -> str:
-        for sentence in analyzed_text.sentences:
-            if sentence.start_char <= start_char and end_char <= sentence.end_char:
-                return sentence.text
-
-        return analyzed_text.original_text
+    def _normalize_phrase_parts(self, phrase: str) -> list[str]:
+        return re.findall(r"\w+|[^\w\s]", phrase.lower())
 
     #---------- <Summary> ----------
-    # Summary: Decides whether a known ambiguity is clarified by measurable context.
+    # Summary: Compares seed phrase parts with spaCy token text and lemma values.
     #---------- </Summary> ----------
-    def _should_reject(
+    def _tokens_match_phrase(
+        self,
+        tokens: list[AnalyzedToken],
+        term_parts: list[str],
+    ) -> bool:
+        return all(
+            term_part in self._token_variants(token)
+            for token, term_part in zip(tokens, term_parts)
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Produces comparable text variants for one token without duplicating JSON seeds.
+    #---------- </Summary> ----------
+    def _token_variants(self, token: AnalyzedToken) -> set[str]:
+        variants = {
+            token.text.lower(),
+            token.lemma.lower(),
+        }
+        normalized_adverb = self._normalize_adverb(token.text.lower())
+        if normalized_adverb:
+            variants.add(normalized_adverb)
+
+        normalized_lemma_adverb = self._normalize_adverb(token.lemma.lower())
+        if normalized_lemma_adverb:
+            variants.add(normalized_lemma_adverb)
+
+        return variants
+
+    #---------- <Summary> ----------
+    # Summary: Converts common adverb forms into their adjective seed form.
+    #---------- </Summary> ----------
+    def _normalize_adverb(self, value: str) -> str | None:
+        if value.endswith("ably") and len(value) > 5:
+            return value[:-4] + "able"
+
+        if value.endswith("ibly") and len(value) > 5:
+            return value[:-4] + "ible"
+
+        if value.endswith("ily") and len(value) > 4:
+            return value[:-3] + "y"
+
+        if value.endswith("ly") and len(value) > 3:
+            return value[:-2]
+
+        return None
+
+    #---------- <Summary> ----------
+    # Summary: Converts one matched token window into a pre-analysis candidate.
+    #---------- </Summary> ----------
+    def _build_candidate_from_tokens(
+        self,
+        tokens: list[AnalyzedToken],
+        sentence: AnalyzedSentence,
+        term: AmbiguityTerm,
+    ) -> AmbiguityCandidate:
+        matched_text = sentence.text[
+            tokens[0].start_char - sentence.start_char:
+            tokens[-1].end_char - sentence.start_char
+        ]
+
+        return AmbiguityCandidate(
+            phrase=term.phrase,
+            matched_text=matched_text,
+            reason=self._reason_for_category(term.category),
+            severity=term.severity,
+            category=term.category,
+            start_char=tokens[0].start_char,
+            end_char=tokens[-1].end_char,
+            sentence=sentence.text,
+            source="knownKnowledge",
+            linguistic_role=self._describe_linguistic_role(tokens),
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Creates a short explanation based on the ambiguity category.
+    #---------- </Summary> ----------
+    def _reason_for_category(self, category: str) -> str:
+        reasons = {
+            "performance": "The performance expectation is not measurable without objective context.",
+            "usability": "The usability expectation is subjective without observable criteria.",
+            "security": "The security expectation is unclear without specified controls, standards, or threat scope.",
+            "reliability": "The reliability expectation is not measurable without failure-rate, availability, or recovery criteria.",
+            "availability": "The availability expectation is incomplete without a concrete availability target.",
+            "scalability": "The scalability expectation is unclear without workload, user count, or throughput targets.",
+            "maintainability": "The maintainability expectation is subjective without measurable maintenance criteria.",
+            "time": "The expected time frame is not measurable without a concrete time target.",
+            "frequency": "The recurrence expectation is incomplete without a concrete interval.",
+            "quantity": "The quantity or magnitude is not measurable without a concrete amount.",
+            "scope": "The requirement scope is open-ended and incomplete.",
+            "condition": "The condition or trigger is not specified.",
+        }
+
+        return reasons.get(
+            category,
+            "The expression is unclear without objective acceptance criteria.",
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Describes the grammatical role of a matched ambiguity term.
+    #---------- </Summary> ----------
+    def _describe_linguistic_role(self, tokens: list[AnalyzedToken]) -> str:
+        token = tokens[0]
+
+        if len(tokens) == 1:
+            role = (
+                f"Matched token is used as {token.pos} "
+                f"with dependency {token.dependency}."
+            )
+            if token.head_text:
+                role += (
+                    f" It modifies or depends on '{token.head_text}' "
+                    f"({token.head_pos}, dependency {token.head_dependency})."
+                )
+            return role
+
+        return "Matched phrase is represented by consecutive NLP tokens."
+
+    #---------- <Summary> ----------
+    # Summary: Rejects a performance adjective when grammar shows it modifies a domain object.
+    #---------- </Summary> ----------
+    def _get_domain_object_rejection(
+        self,
+        candidate: AmbiguityCandidate,
+    ) -> str | None:
+        if candidate.category != "performance":
+            return None
+
+        if "dependency amod" not in (candidate.linguistic_role or ""):
+            return None
+
+        if self._candidate_mentions_system_behavior(candidate):
+            return None
+
+        return (
+            "The candidate modifies a domain object rather than defining "
+            "a measurable system performance expectation."
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Checks whether the candidate is grammatically tied to a system behavior.
+    #---------- </Summary> ----------
+    def _candidate_mentions_system_behavior(self, candidate: AmbiguityCandidate) -> bool:
+        sentence = candidate.sentence.lower()
+        matched = candidate.matched_text.lower()
+        role = candidate.linguistic_role or ""
+
+        if "dependency compound" in role:
+            return False
+
+        if "It modifies or depends on" in role and "(VERB, dependency amod)" in role:
+            return False
+
+        return matched in sentence and any(
+            word.endswith("ing") or word.endswith("ed")
+            for word in sentence.split()
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Decides whether measurable context clarifies a known ambiguity.
+    #---------- </Summary> ----------
+    def _is_clarified_by_measurement(
         self,
         candidate: AmbiguityCandidate,
         measurable_expressions: list[MeasurableExpression],
     ) -> bool:
-        if candidate.validation_rule in {
-            "requires_measurable_performance_context",
-            "requires_measurable_time_context",
-        }:
-            return self._has_related_measurable_expression(
-                candidate,
-                measurable_expressions,
-                allowed_categories={"time"},
-            )
+        allowed_categories = self._clarifying_measurement_categories(
+            candidate.category,
+        )
+        if not allowed_categories:
+            return False
 
-        if candidate.validation_rule == "requires_quantifiable_amount":
-            return self._has_related_measurable_expression(
-                candidate,
-                measurable_expressions,
-                allowed_categories={"count", "percentage", "size"},
-            )
+        return self._has_related_measurable_expression(
+            candidate,
+            measurable_expressions,
+            allowed_categories,
+        )
 
-        if candidate.validation_rule == "requires_availability_criteria":
-            return self._has_related_measurable_expression(
-                candidate,
-                measurable_expressions,
-                allowed_categories={"percentage"},
-            )
+    #---------- <Summary> ----------
+    # Summary: Defines which measurement types can clarify each ambiguity category.
+    #---------- </Summary> ----------
+    def _clarifying_measurement_categories(self, category: str) -> set[str]:
+        category_map = {
+            "performance": {"time"},
+            "time": {"time"},
+            "availability": {"percentage"},
+            "frequency": {"frequency", "time"},
+            "quantity": {"count", "percentage", "size"},
+            "scalability": {"count", "percentage", "frequency"},
+        }
 
-        if candidate.validation_rule == "requires_frequency_criteria":
-            return self._has_related_measurable_expression(
-                candidate,
-                measurable_expressions,
-                allowed_categories={"frequency", "time"},
-            )
-
-        return False
+        return category_map.get(category, set())
 
     #---------- <Summary> ----------
     # Summary: Checks if a supporting measurable expression exists in the same sentence.
@@ -230,15 +397,19 @@ class KnownAmbiguityDetector:
             end_char=candidate.end_char,
             sentence=candidate.sentence,
             evidence="No sufficient measurable or objective context was found for this candidate.",
+            source=candidate.source,
+            linguistic_role=candidate.linguistic_role,
+            prompt_guidance=candidate.prompt_guidance,
         )
 
     #---------- <Summary> ----------
-    # Summary: Marks a candidate as rejected when measurable context clarifies it.
+    # Summary: Marks a candidate as rejected when measurable or grammatical context clarifies it.
     #---------- </Summary> ----------
     def _build_rejected_candidate(
         self,
         candidate: AmbiguityCandidate,
         measurable_expressions: list[MeasurableExpression],
+        rejection_reason: str | None = None,
     ) -> RejectedAmbiguityCandidate:
         supporting_expression = self._find_supporting_expression(
             candidate,
@@ -253,14 +424,20 @@ class KnownAmbiguityDetector:
             start_char=candidate.start_char,
             end_char=candidate.end_char,
             sentence=candidate.sentence,
-            rejection_reason="A measurable expression in the same sentence provides sufficient objective context.",
+            rejection_reason=rejection_reason
+            or "A measurable expression in the same sentence provides sufficient objective context.",
             supporting_expression=supporting_expression.text
             if supporting_expression
             else None,
+            source=candidate.source,
+            linguistic_role=candidate.linguistic_role,
+            prompt_guidance=(
+                "Do not report this term as a standalone ambiguity because context clarifies it."
+            ),
         )
 
     #---------- <Summary> ----------
-    # Summary: Finds the measurable expression that explains why a candidate was rejected.
+    # Summary: Finds the measurable expression that supports a rejection decision.
     #---------- </Summary> ----------
     def _find_supporting_expression(
         self,

@@ -19,17 +19,14 @@ class JsonAmbiguityRepository(AmbiguityKnowledgeRepositoryPort):
     # Summary: Returns known ambiguity terms used by KnownAmbiguityDetector.
     #---------- </Summary> ----------
     def get_all_terms(self) -> list[AmbiguityTerm]:
-        with self.file_path.open("r", encoding="utf-8") as file:
+        with self.file_path.open("r", encoding="utf-8-sig") as file:
             raw_terms = json.load(file)
 
         return [
             AmbiguityTerm(
                 phrase=item["phrase"],
-                reason=item["reason"],
                 severity=item["severity"],
                 category=item["category"],
-                match_type=item.get("matchType", "phrase"),
-                validation_rule=item.get("validationRule"),
             )
             for item in raw_terms
         ]

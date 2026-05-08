@@ -38,6 +38,25 @@ class TextProcessingPipeline:
     #---------- </Summary> ----------
     def _normalize_spacing_around_punctuation(self, text: str) -> str:
         text = re.sub(r"\s+([.,;:!?])", r"\1", text)
-        text = re.sub(r"([.,;:!?])(?=\S)", r"\1 ", text)
+        text = re.sub(r"([.,;:!?])(?=\S)", self._space_after_punctuation, text)
 
         return text.strip()
+
+    #---------- <Summary> ----------
+    # Summary: Adds punctuation spacing without breaking decimal or thousands numbers.
+    #---------- </Summary> ----------
+    def _space_after_punctuation(self, match: re.Match) -> str:
+        punctuation = match.group(1)
+        text = match.string
+        index = match.start(1)
+        previous_char = text[index - 1] if index > 0 else ""
+        next_char = text[index + 1] if index + 1 < len(text) else ""
+
+        if (
+            punctuation in {".", ","}
+            and previous_char.isdigit()
+            and next_char.isdigit()
+        ):
+            return punctuation
+
+        return f"{punctuation} "

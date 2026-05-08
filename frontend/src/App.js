@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { cloneElement, useState } from "react";
 import "./App.css";
 
 function App() {
@@ -116,10 +116,17 @@ function App() {
             <section className="content-grid">
               <div className="result-stack">
                 <ResultCard icon="PI" tone="blue" title="Provider Info">
-                  <div className="meta-row">
-                    <span><strong>Provider:</strong> <b>{result.providerUsed}</b></span>
-                    <span><strong>Version:</strong> <b>{analysisVersion.toUpperCase()}</b></span>
-                    <span><strong>Fallback:</strong> <b>{result.isFallback ? "Yes" : "No"}</b></span>
+                  <div className="provider-info-row">
+                    <div className="meta-row">
+                      <span><strong>Provider:</strong> <b>{result.providerUsed}</b></span>
+                      <span><strong>Version:</strong> <b>{analysisVersion.toUpperCase()}</b></span>
+                      <span><strong>Fallback:</strong> <b>{result.isFallback ? "Yes" : "No"}</b></span>
+                    </div>
+                    {getFriendlyWarning(result) && (
+                      <div className="provider-warning">
+                        {getFriendlyWarning(result)}
+                      </div>
+                    )}
                   </div>
                 </ResultCard>
 
@@ -176,79 +183,107 @@ function App() {
 
                 {preAnalysis ? (
                   <>
-                    <SideSection
-                      icon="?"
-                      title="Candidate Ambiguities"
-                      count={preAnalysis.ambiguityCandidates?.length || 0}
-                      tone="blue"
-                    >
-                      <MiniList
-                        items={preAnalysis.ambiguityCandidates}
-                        renderItem={(item) => item.matchedText}
-                      />
-                    </SideSection>
+                    <PreAnalysisGroup title="Pre-analysis Findings" tone="findings">
+                      <SideSection
+                        icon="?"
+                        title="Candidate Ambiguities"
+                        count={preAnalysis.ambiguityCandidates?.length || 0}
+                        tone="blue"
+                      >
+                        <MiniList
+                          items={preAnalysis.ambiguityCandidates}
+                          renderItem={(item) => item.matchedText}
+                        />
+                      </SideSection>
 
-                    <SideSection
-                      icon="OK"
-                      title="Confirmed Ambiguities"
-                      count={preAnalysis.confirmedAmbiguities?.length || 0}
-                      tone="green"
-                    >
-                      <MiniList
-                        items={preAnalysis.confirmedAmbiguities}
-                        renderItem={(item) => item.matchedText}
-                      />
-                    </SideSection>
+                      <SideSection
+                        icon="OK"
+                        title="Confirmed Ambiguities"
+                        count={preAnalysis.confirmedAmbiguities?.length || 0}
+                        tone="green"
+                      >
+                        <MiniList
+                          items={preAnalysis.confirmedAmbiguities}
+                          renderItem={(item) => item.matchedText}
+                        />
+                      </SideSection>
 
-                    <SideSection
-                      icon="x"
-                      title="Rejected Candidates"
-                      count={preAnalysis.rejectedAmbiguityCandidates?.length || 0}
-                      tone="red"
-                    >
-                      <MiniList
-                        items={preAnalysis.rejectedAmbiguityCandidates}
-                        renderItem={(item) =>
-                          `${item.matchedText}${item.supportingExpression ? ` (${item.supportingExpression})` : ""}`
-                        }
-                      />
-                    </SideSection>
+                      <SideSection
+                        icon="x"
+                        title="Rejected Candidates"
+                        count={preAnalysis.rejectedAmbiguityCandidates?.length || 0}
+                        tone="red"
+                      >
+                        <MiniList
+                          items={preAnalysis.rejectedAmbiguityCandidates}
+                          renderItem={(item) =>
+                            `${item.matchedText}${item.supportingExpression ? ` (${item.supportingExpression})` : ""}`
+                          }
+                        />
+                      </SideSection>
 
-                    <SideSection
-                      icon="Q"
-                      title="Reference Ambiguities"
-                      count={preAnalysis.referenceAmbiguities?.length || 0}
-                      tone="purple"
-                    >
-                      <MiniList
-                        items={preAnalysis.referenceAmbiguities}
-                        renderItem={(item) => `${item.phrase} (${item.category})`}
-                      />
-                    </SideSection>
+                      <SideSection
+                        icon="Q"
+                        title="Reference Ambiguities"
+                        count={preAnalysis.referenceAmbiguities?.length || 0}
+                        tone="purple"
+                      >
+                        <MiniList
+                          items={preAnalysis.referenceAmbiguities}
+                          renderItem={(item) => `${item.phrase} (${item.category})`}
+                        />
+                      </SideSection>
 
-                    <SideSection
-                      icon="G"
-                      title="Measurement Ambiguities"
-                      count={preAnalysis.measurementAmbiguities?.length || 0}
-                      tone="orange"
-                    >
-                      <MiniList
-                        items={preAnalysis.measurementAmbiguities}
-                        renderItem={(item) => `${item.phrase} (${item.missingDimension})`}
-                      />
-                    </SideSection>
+                      <SideSection
+                        icon="G"
+                        title="Measurement Ambiguities"
+                        count={preAnalysis.measurementAmbiguities?.length || 0}
+                        tone="orange"
+                      >
+                        <MiniList
+                          items={preAnalysis.measurementAmbiguities}
+                          renderItem={(item) => `${item.phrase} (${item.missingDimension})`}
+                        />
+                      </SideSection>
+                    </PreAnalysisGroup>
 
-                    <SideSection
-                      icon="M"
-                      title="Measurable Expressions"
-                      count={preAnalysis.measurableExpressions?.length || 0}
-                      tone="cyan"
-                    >
-                      <MiniList
-                        items={preAnalysis.measurableExpressions}
-                        renderItem={(item) => item.text}
-                      />
-                    </SideSection>
+                    <PreAnalysisGroup title="Context Observations" tone="context">
+                      <SideSection
+                        icon="MC"
+                        title="Measurement Contexts"
+                        count={preAnalysis.measurementContexts?.length || 0}
+                        tone="yellow"
+                      >
+                        <MiniList
+                          items={preAnalysis.measurementContexts}
+                          renderItem={renderMeasurementContext}
+                        />
+                      </SideSection>
+
+                      <SideSection
+                        icon="SV"
+                        title="Semantic Findings"
+                        count={preAnalysis.semanticFindings?.length || 0}
+                        tone="blue"
+                      >
+                        <MiniList
+                          items={preAnalysis.semanticFindings}
+                          renderItem={(item) => `${item.phrase} (${item.decision})`}
+                        />
+                      </SideSection>
+
+                      <SideSection
+                        icon="M"
+                        title="Measurable Expressions"
+                        count={preAnalysis.measurableExpressions?.length || 0}
+                        tone="cyan"
+                      >
+                        <MiniList
+                          items={preAnalysis.measurableExpressions}
+                          renderItem={(item) => item.text}
+                        />
+                      </SideSection>
+                    </PreAnalysisGroup>
                   </>
                 ) : (
                   <SideSection icon="i" title="No Pre-analysis" count={0} tone="blue">
@@ -285,6 +320,15 @@ function App() {
   );
 }
 
+function PreAnalysisGroup({ title, tone, children }) {
+  return (
+    <div className={`pre-analysis-group ${tone}`}>
+      <div className="pre-analysis-group-title">{title}</div>
+      {children}
+    </div>
+  );
+}
+
 function ResultCard({ icon, tone, title, count, children }) {
   return (
     <article className="result-card">
@@ -300,7 +344,44 @@ function ResultCard({ icon, tone, title, count, children }) {
   );
 }
 
+function renderMeasurementContext(item) {
+  const details = [];
+
+  if (item.percentageTarget && item.percentageSubject) {
+    details.push(`${item.percentageTarget} -> ${item.percentageSubject}`);
+  }
+
+  if (item.loadContext) {
+    details.push(`load: ${item.loadContext}`);
+  }
+
+  if (item.statisticalTarget) {
+    details.push(`statistical: ${item.statisticalTarget}`);
+  }
+
+  if (item.measuredItem) {
+    details.push(`measured: ${item.measuredItem}`);
+  }
+
+  if (item.nearbyAction) {
+    details.push(`action: ${item.nearbyAction}`);
+  }
+
+  if (item.timeTarget) {
+    details.push(`time: ${item.timeTarget}`);
+  }
+
+  if (item.condition) {
+    details.push(`condition: ${item.condition}`);
+  }
+
+  return details.join("; ") || item.sentence;
+}
+
 function SideSection({ icon, title, count, tone, children }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasHiddenItems = count > 3;
+
   return (
     <section className="side-section">
       <div className="side-title-row">
@@ -310,8 +391,18 @@ function SideSection({ icon, title, count, tone, children }) {
         </div>
         <span className={`count-badge ${tone}`}>{count}</span>
       </div>
-      {children}
-      <button className="view-link" type="button">View all</button>
+      {children?.type === MiniList
+        ? cloneElement(children, { expanded, visibleLimit: 3 })
+        : children}
+      {hasHiddenItems && (
+        <button
+          className="view-link"
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "Show less" : "View all"}
+        </button>
+      )}
     </section>
   );
 }
@@ -331,14 +422,16 @@ function BulletList({ items, emptyText, renderItem }) {
   );
 }
 
-function MiniList({ items, renderItem }) {
+function MiniList({ items, renderItem, expanded = true, visibleLimit = 3 }) {
   if (!items || items.length === 0) {
     return <p className="muted">No items.</p>;
   }
 
+  const visibleItems = expanded ? items : items.slice(0, visibleLimit);
+
   return (
     <ul className="mini-list">
-      {items.slice(0, 4).map((item, index) => (
+      {visibleItems.map((item, index) => (
         <li key={index}>{renderItem(item)}</li>
       ))}
     </ul>
@@ -346,21 +439,51 @@ function MiniList({ items, renderItem }) {
 }
 
 function OptionList({ items }) {
+  const [expanded, setExpanded] = useState(false);
+
   if (!items || items.length === 0) {
     return <p className="muted">No improved text options available.</p>;
   }
 
+  const visibleItems = expanded ? items : items.slice(0, 1);
+  const hasHiddenItems = items.length > 1;
+
   return (
-    <div className="option-list">
-      {items.map((item, index) => (
-        <div className="option-item" key={index}>
-          <div className="option-label">{item.label}</div>
-          <p>{item.text}</p>
-          <small>{item.reason}</small>
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="option-list">
+        {visibleItems.map((item, index) => (
+          <div className="option-item" key={index}>
+            <div className="option-label">{item.label}</div>
+            <p>{item.text}</p>
+            <small>{item.reason}</small>
+          </div>
+        ))}
+      </div>
+      {hasHiddenItems && (
+        <button
+          className="view-link"
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "Show less" : "View all"}
+        </button>
+      )}
+    </>
   );
+}
+
+function getFriendlyWarning(result) {
+  const warnings = result?.warnings || [];
+
+  if (warnings.some((item) => item.toLowerCase().includes("gemini quota"))) {
+    return "Gemini token/request limit reached. Mock response is shown.";
+  }
+
+  if (result?.isFallback) {
+    return "Selected provider failed. Mock response is shown.";
+  }
+
+  return "";
 }
 
 function withLineNumbers(text) {
