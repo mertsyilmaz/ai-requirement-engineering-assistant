@@ -1,0 +1,120 @@
+[
+  {
+    "requirementType": "Functional",
+    "description": "A functional requirement describes a system capability, feature, business behavior, workflow, or user-visible operation that lets an actor accomplish a task or changes domain information.",
+    "checkpoints": [
+      "actor",
+      "system capability",
+      "business object",
+      "trigger",
+      "outcome",
+      "business rule"
+    ]
+  },
+  {
+    "requirementType": "Performance Efficiency",
+    "description": "A performance efficiency requirement describes timing, speed, throughput, capacity, latency, resource usage, scalability, or efficiency under defined operating conditions.",
+    "checkpoints": [
+      "measured operation",
+      "numeric target",
+      "load context",
+      "statistical target",
+      "measurement boundary",
+      "resource limit"
+    ]
+  },
+  {
+    "requirementType": "Compatibility",
+    "description": "A compatibility requirement describes integration, synchronization, interoperation, coexistence, communication, data exchange, message exchange, event exchange, interface use, protocol use, or format alignment between the system and another system, service, component, application, platform, or environment. It includes synchronization of status information with external systems through APIs.",
+    "checkpoints": [
+      "external system",
+      "integration partner",
+      "interface",
+      "synchronization",
+      "message exchange",
+      "data format",
+      "coexistence",
+      "environment"
+    ]
+  },
+  {
+    "requirementType": "Interaction Capability",
+    "description": "An interaction capability requirement describes usability, accessibility, learnability, operability, user experience, task completion, user interface behavior, or human interaction quality.",
+    "checkpoints": [
+      "user group",
+      "user task",
+      "interaction quality",
+      "success criterion",
+      "accessibility"
+    ]
+  },
+  {
+    "requirementType": "Reliability",
+    "description": "A reliability requirement describes availability, continuity, recoverability, fault tolerance, failure handling, error rate, transaction accuracy, consistency over time, or correct operation despite faults.",
+    "checkpoints": [
+      "failure condition",
+      "availability target",
+      "recovery target",
+      "error rate",
+      "fault tolerance",
+      "continuity"
+    ]
+  },
+  {
+    "requirementType": "Security",
+    "description": "A security requirement describes protection of data, users, identities, operations, or system areas through authentication, authorization, encryption, access control, auditability, privacy, integrity, or threat mitigation.",
+    "checkpoints": [
+      "security scope",
+      "security mechanism",
+      "security risk",
+      "access rule",
+      "security verification"
+    ]
+  },
+  {
+    "requirementType": "Maintainability",
+    "description": "A maintainability requirement describes how easily the system can be analyzed, changed, tested, diagnosed, repaired, monitored, understood, or improved over its lifetime.",
+    "checkpoints": [
+      "change scope",
+      "maintenance activity",
+      "diagnostic support",
+      "testability",
+      "modification effort"
+    ]
+  },
+  {
+    "requirementType": "Flexibility",
+    "description": "A flexibility requirement describes adaptation to changed needs, configuration, extension, customization, variation, scaling, rules, contexts, or administrator-controlled changes without code changes or redeployment.",
+    "checkpoints": [
+      "variation point",
+      "configuration",
+      "adaptation scope",
+      "extension point",
+      "change constraint",
+      "deployment independence"
+    ]
+  },
+  {
+    "requirementType": "Safety",
+    "description": "A safety requirement describes prevention or reduction of harm, hazards, unsafe states, safe-state transitions, injury, damage, loss, or unacceptable risk to people, property, environment, or operations.",
+    "checkpoints": [
+      "hazard",
+      "harm",
+      "safety control",
+      "safe state",
+      "safety verification"
+    ]
+  },
+  {
+    "requirementType": "Portability",
+    "description": "A portability requirement describes installation, deployment, migration, replacement, transfer, or operation across platforms, devices, operating systems, infrastructures, environments, or runtime contexts.",
+    "checkpoints": [
+      "target platform",
+      "operating system",
+      "deployment environment",
+      "installation",
+      "migration",
+      "replacement"
+    ]
+  }
+]

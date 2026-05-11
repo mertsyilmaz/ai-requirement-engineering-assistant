@@ -256,6 +256,53 @@ class SemanticAmbiguityFinding:
 
 @dataclass(frozen=True)
 #---------- <Summary> ----------
+# Summary: Requirement type definition loaded from semantic type knowledge.
+#---------- </Summary> ----------
+class RequirementTypeDefinition:
+
+    requirement_type: str
+    description: str
+    checkpoints: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+#---------- <Summary> ----------
+# Summary: Type-aware observation found by comparing text spans with type checkpoints.
+#---------- </Summary> ----------
+class RequirementTypeObservation:
+
+    checkpoint: str
+    phrase: str
+    similarity_score: float
+    sentence: str
+
+
+@dataclass(frozen=True)
+#---------- <Summary> ----------
+# Summary: Secondary semantic requirement type candidate used by V3.
+#---------- </Summary> ----------
+class SecondaryRequirementType:
+
+    requirement_type: str
+    confidence: float
+    description: str
+
+
+@dataclass(frozen=True)
+#---------- <Summary> ----------
+# Summary: Semantic requirement type detection result used by V3.
+#---------- </Summary> ----------
+class RequirementTypeAnalysis:
+
+    requirement_type: str
+    confidence: float
+    description: str
+    secondary_types: list[SecondaryRequirementType] = field(default_factory=list)
+    observations: list[RequirementTypeObservation] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+#---------- <Summary> ----------
 # Summary: Complete output of pre-analysis used to enrich the LLM prompt.
 #---------- </Summary> ----------
 class PreAnalysisResult:
@@ -271,4 +318,5 @@ class PreAnalysisResult:
     measurement_ambiguities: list[MeasurementAmbiguity] = field(default_factory=list)
     measurement_contexts: list[MeasurementContext] = field(default_factory=list)
     semantic_findings: list[SemanticAmbiguityFinding] = field(default_factory=list)
+    requirement_type_analysis: RequirementTypeAnalysis | None = None
     prompt_guidance: list[str] = field(default_factory=list)

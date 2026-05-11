@@ -9,12 +9,14 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPromptModal, setShowPromptModal] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
 
   const handleAnalyze = async () => {
     setLoading(true);
     setError("");
     setResult(null);
     setShowPromptModal(false);
+    setCopyStatus("");
 
     try {
       const response = await fetch("http://127.0.0.1:8000/api/v1/requirements/analyze", {
@@ -46,6 +48,21 @@ function App() {
   const preAnalysis = result?.preAnalysis;
   const hasPrompt = Boolean(result?.promptUsed);
 
+  const handleCopyResult = async () => {
+    if (!result) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(formatResultForCopy(result, analysisVersion));
+      setCopyStatus("copied");
+      window.setTimeout(() => setCopyStatus(""), 1400);
+    } catch (err) {
+      setCopyStatus("failed");
+      window.setTimeout(() => setCopyStatus(""), 1800);
+    }
+  };
+
   return (
     <div className="page">
       <div className="app-frame">
@@ -59,16 +76,33 @@ function App() {
 
         <main className="workspace">
           <section className="composer">
-            {hasPrompt && (
-              <button
-                className="prompt-launch"
-                type="button"
-                onClick={() => setShowPromptModal(true)}
-                title="View generated prompt"
-              >
-                <span className="file-corner" />
-                <span>&lt;/&gt;</span>
-              </button>
+            {result && (
+              <div className="composer-tools">
+                {hasPrompt && (
+                  <button
+                    className="tool-launch"
+                    type="button"
+                    onClick={() => setShowPromptModal(true)}
+                    title="View generated prompt"
+                  >
+                    <span className="file-corner" />
+                    <span>&lt;/&gt;</span>
+                  </button>
+                )}
+
+                <button
+                  className="tool-launch"
+                  type="button"
+                  onClick={handleCopyResult}
+                  title="Copy clean analysis result"
+                >
+                  {copyStatus === "copied" ? (
+                    <span className="check-icon" />
+                  ) : (
+                    <span className="copy-icon" />
+                  )}
+                </button>
+              </div>
             )}
 
             <textarea
@@ -93,6 +127,7 @@ function App() {
               >
                 <option value="v1">Version: V1</option>
                 <option value="v2">Version: V2</option>
+                <option value="v3">Version: V3</option>
               </select>
 
               <button
@@ -121,6 +156,16 @@ function App() {
                       <span><strong>Provider:</strong> <b>{result.providerUsed}</b></span>
                       <span><strong>Version:</strong> <b>{analysisVersion.toUpperCase()}</b></span>
                       <span><strong>Fallback:</strong> <b>{result.isFallback ? "Yes" : "No"}</b></span>
+                      {result.timings && (
+                        <span>
+                          <strong>Time:</strong>{" "}
+                          <b>
+                            total {formatMs(result.timings.totalMs)}
+                            {preAnalysis ? ` / pre ${formatMs(result.timings.preAnalysisMs)}` : ""}
+                            {` / llm ${formatMs(result.timings.llmMs)}`}
+                          </b>
+                        </span>
+                      )}
                     </div>
                     {getFriendlyWarning(result) && (
                       <div className="provider-warning">
@@ -183,6 +228,50 @@ function App() {
 
                 {preAnalysis ? (
                   <>
+                    {preAnalysis.requirementTypeAnalysis && (
+                      <PreAnalysisGroup title="Type Analysis" tone="type">
+                        <SideSection
+                          icon="T"
+                          title={getRequirementTypeSectionTitle(preAnalysis.requirementTypeAnalysis)}
+                          count={1}
+                          tone="purple"
+                        >
+                          <MiniList
+                            items={[preAnalysis.requirementTypeAnalysis]}
+                            renderItem={renderRequirementTypeAnalysis}
+                          />
+                        </SideSection>
+
+                        {preAnalysis.requirementTypeAnalysis.secondaryTypes?.length > 0 && (
+                          <SideSection
+                            icon="T2"
+                            title="Secondary Types"
+                            count={preAnalysis.requirementTypeAnalysis.secondaryTypes.length}
+                            tone="cyan"
+                          >
+                            <MiniList
+                              items={preAnalysis.requirementTypeAnalysis.secondaryTypes}
+                              renderItem={renderRequirementTypeAnalysis}
+                            />
+                          </SideSection>
+                        )}
+
+                        {preAnalysis.requirementTypeAnalysis.observations?.length > 0 && (
+                          <SideSection
+                            icon="TO"
+                            title="Type Observations"
+                            count={preAnalysis.requirementTypeAnalysis.observations.length}
+                            tone="blue"
+                          >
+                            <MiniList
+                              items={preAnalysis.requirementTypeAnalysis.observations}
+                              renderItem={renderRequirementTypeObservation}
+                            />
+                          </SideSection>
+                        )}
+                      </PreAnalysisGroup>
+                    )}
+
                     <PreAnalysisGroup title="Pre-analysis Findings" tone="findings">
                       <SideSection
                         icon="?"
@@ -278,9 +367,9 @@ function App() {
                         count={preAnalysis.measurableExpressions?.length || 0}
                         tone="cyan"
                       >
-                        <MiniList
-                          items={preAnalysis.measurableExpressions}
-                          renderItem={(item) => item.text}
+                          <MiniList
+                            items={preAnalysis.measurableExpressions}
+                          renderItem={renderMeasurableExpression}
                         />
                       </SideSection>
                     </PreAnalysisGroup>
@@ -376,6 +465,31 @@ function renderMeasurementContext(item) {
   }
 
   return details.join("; ") || item.sentence;
+}
+
+function renderRequirementTypeAnalysis(item) {
+  const confidence = Number(item.confidence || 0);
+  const suffix = isRequirementTypePromptEligible(item)
+    ? ""
+    : ", low confidence";
+
+  return `${item.requirementType} (${confidence.toFixed(2)}${suffix})`;
+}
+
+function renderRequirementTypeObservation(item) {
+  return `${item.checkpoint}: ${item.phrase} (${Number(item.similarityScore || 0).toFixed(2)})`;
+}
+
+function renderMeasurableExpression(item) {
+  return `${item.text}${item.category ? ` (${item.category})` : ""}`;
+}
+
+function isRequirementTypePromptEligible(item) {
+  return Number(item?.confidence || 0) >= 0.35 || Boolean(item?.observations?.length);
+}
+
+function getRequirementTypeSectionTitle(item) {
+  return isRequirementTypePromptEligible(item) ? "Detected Type" : "Possible Type";
 }
 
 function SideSection({ icon, title, count, tone, children }) {
@@ -484,6 +598,166 @@ function getFriendlyWarning(result) {
   }
 
   return "";
+}
+
+function formatResultForCopy(result, analysisVersion) {
+  const lines = [];
+  const preAnalysis = result.preAnalysis;
+
+  lines.push("Provider Info");
+  lines.push(`Provider: ${result.providerUsed || "-"}`);
+  lines.push(`Version: ${String(analysisVersion || "").toUpperCase()}`);
+  lines.push(`Fallback: ${result.isFallback ? "Yes" : "No"}`);
+  if (result.timings) {
+    lines.push(
+      `Time: total ${formatMs(result.timings.totalMs)} / pre-analysis ${formatMs(result.timings.preAnalysisMs)} / llm ${formatMs(result.timings.llmMs)}`
+    );
+  }
+
+  const warning = getFriendlyWarning(result);
+  if (warning) {
+    lines.push(`Warning: ${warning}`);
+  }
+
+  lines.push("");
+  lines.push("User Story");
+  lines.push(result.userStory || "-");
+  lines.push("");
+  lines.push("Requirement Type");
+  lines.push(result.requirementType || "-");
+  lines.push("");
+
+  appendList(
+    lines,
+    "Ambiguities",
+    result.ambiguities,
+    (item) => `${item.phrase}: ${item.reason}`
+  );
+  appendList(
+    lines,
+    "Suggestions",
+    result.suggestions,
+    (item) => `${item.originalPart} -> ${item.suggestedPart}. ${item.reason}`
+  );
+
+  lines.push("Improved Text");
+  lines.push(result.improvedText || "-");
+  lines.push("");
+
+  appendList(
+    lines,
+    "Improved Text Options",
+    result.improvedTextOptions,
+    (item) => `${item.label}: ${item.text}${item.reason ? `\nReason: ${item.reason}` : ""}`
+  );
+
+  if (!preAnalysis) {
+    lines.push("Pre-analysis");
+    lines.push("No pre-analysis details.");
+    return lines.join("\n");
+  }
+
+  lines.push("Pre-analysis");
+  if (preAnalysis.requirementTypeAnalysis) {
+    lines.push("Type Analysis");
+    const typePrefix = isRequirementTypePromptEligible(preAnalysis.requirementTypeAnalysis)
+      ? "Detected Type"
+      : "Possible Type";
+    const typeSuffix = isRequirementTypePromptEligible(preAnalysis.requirementTypeAnalysis)
+      ? ""
+      : " (low confidence; not sent to prompt)";
+    lines.push(
+      `${typePrefix}: ${preAnalysis.requirementTypeAnalysis.requirementType} (${Number(preAnalysis.requirementTypeAnalysis.confidence || 0).toFixed(2)})${typeSuffix}`
+    );
+    appendList(
+      lines,
+      "Secondary Types",
+      preAnalysis.requirementTypeAnalysis.secondaryTypes,
+      renderRequirementTypeAnalysis
+    );
+    appendList(
+      lines,
+      "Type Observations",
+      preAnalysis.requirementTypeAnalysis.observations,
+      renderRequirementTypeObservation
+    );
+  }
+
+  appendList(
+    lines,
+    "Candidate Ambiguities",
+    preAnalysis.ambiguityCandidates,
+    (item) => item.matchedText
+  );
+  appendList(
+    lines,
+    "Confirmed Ambiguities",
+    preAnalysis.confirmedAmbiguities,
+    (item) => item.matchedText
+  );
+  appendList(
+    lines,
+    "Rejected Candidates",
+    preAnalysis.rejectedAmbiguityCandidates,
+    (item) => `${item.matchedText}${item.supportingExpression ? ` (${item.supportingExpression})` : ""}`
+  );
+  appendList(
+    lines,
+    "Reference Ambiguities",
+    preAnalysis.referenceAmbiguities,
+    (item) => `${item.phrase} (${item.category})`
+  );
+  appendList(
+    lines,
+    "Measurement Ambiguities",
+    preAnalysis.measurementAmbiguities,
+    (item) => `${item.phrase} (${item.missingDimension})`
+  );
+  appendList(
+    lines,
+    "Measurement Contexts",
+    preAnalysis.measurementContexts,
+    renderMeasurementContext
+  );
+  appendList(
+    lines,
+    "Semantic Findings",
+    preAnalysis.semanticFindings,
+    (item) => `${item.phrase} (${item.decision})`
+  );
+  appendList(
+    lines,
+    "Measurable Expressions",
+    preAnalysis.measurableExpressions,
+    renderMeasurableExpression
+  );
+
+  return lines.join("\n").trim();
+}
+
+function appendList(lines, title, items, renderItem) {
+  lines.push(title);
+
+  if (!items || items.length === 0) {
+    lines.push("- No items.");
+    lines.push("");
+    return;
+  }
+
+  items.forEach((item) => {
+    lines.push(`- ${renderItem(item)}`);
+  });
+  lines.push("");
+}
+
+function formatMs(value) {
+  const ms = Number(value || 0);
+
+  if (ms >= 1000) {
+    return `${(ms / 1000).toFixed(2)}s`;
+  }
+
+  return `${ms}ms`;
 }
 
 function withLineNumbers(text) {

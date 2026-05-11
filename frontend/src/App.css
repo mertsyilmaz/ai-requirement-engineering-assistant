@@ -87,10 +87,17 @@ body {
   color: #8c9aae;
 }
 
-.prompt-launch {
+.composer-tools {
   position: absolute;
   top: 16px;
   right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-launch {
+  position: relative;
   width: 46px;
   height: 48px;
   border: 1px solid #cad6e5;
@@ -105,6 +112,10 @@ body {
   cursor: pointer;
 }
 
+.tool-launch:hover {
+  background: #f5f8fc;
+}
+
 .file-corner {
   position: absolute;
   top: 9px;
@@ -113,6 +124,35 @@ body {
   height: 8px;
   border-top: 2px solid #172b4d;
   border-right: 2px solid #172b4d;
+}
+
+.copy-icon {
+  position: relative;
+  width: 18px;
+  height: 22px;
+  border: 2px solid #172b4d;
+  border-radius: 3px;
+}
+
+.copy-icon::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 4px;
+  width: 14px;
+  height: 18px;
+  border: 2px solid #172b4d;
+  border-radius: 3px;
+  background: #ffffff;
+  z-index: -1;
+}
+
+.check-icon {
+  width: 20px;
+  height: 12px;
+  border-left: 3px solid #059669;
+  border-bottom: 3px solid #059669;
+  transform: rotate(-45deg);
 }
 
 .composer-controls {
@@ -400,6 +440,11 @@ body {
 .pre-analysis-group.context {
   background: #fff7ed;
   border-color: #fed7aa;
+}
+
+.pre-analysis-group.type {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
 }
 
 .pre-analysis-group-title {

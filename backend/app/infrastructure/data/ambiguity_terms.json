@@ -117,7 +117,7 @@
   {
     "phrase": "safe",
     "severity": "high",
-    "category": "security"
+    "category": "safety"
   },
   {
     "phrase": "protected",

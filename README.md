@@ -19,8 +19,11 @@ The system can generate user stories, detect ambiguities, suggest improvements, 
   - Mock
   - Gemini
 - Automatic fallback to mock provider when selected provider fails
-- V1 and V2 analysis modes
+- V1, V2, and V3 analysis modes
 - NLP-based pre-analysis for V2
+- Type-aware semantic requirement analysis for V3
+- Analysis timing metadata
+- Clean result copy action for easier test comparison
 
 ---
 
@@ -67,6 +70,31 @@ V2 pre-analysis detects:
 - Measurement context observations
 - Measurable expressions
 
+### V3 - Type-Aware Enhanced Analysis
+
+V3 extends V2 with semantic requirement type analysis.
+
+Flow:
+
+```text
+Raw text
+-> Text cleaning
+-> NLP pre-analysis
+-> Semantic requirement type analysis
+-> V3 prompt generation when type context is reliable
+-> LLM provider
+-> Analysis response
+```
+
+V3 can detect:
+
+- Primary requirement type
+- Possible secondary requirement types
+- Type-aware observations
+- Semantic confidence for requirement type analysis
+
+If V3 does not find reliable type context, it falls back to the V2 prompt. If V2 also has no meaningful pre-analysis findings, the system uses the V1 direct prompt.
+
 ---
 
 ## Tech Stack
@@ -79,6 +107,7 @@ V2 pre-analysis detects:
 - spaCy
 - spaCy Transformers
 - Transformers
+- Torch
 - Google Gemini API
 - python-dotenv
 
@@ -194,13 +223,13 @@ lemmatizer
 ner
 ```
 
-Cache the semantic similarity model used by V2:
+Cache the semantic similarity model used by V2 and V3:
 
 ```powershell
 .\venv\Scripts\python.exe -c "from transformers import AutoTokenizer, AutoModel; model='sentence-transformers/all-mpnet-base-v2'; AutoTokenizer.from_pretrained(model); AutoModel.from_pretrained(model); print('semantic model cached')"
 ```
 
-V2 can still run if this model is not cached, but semantic similarity findings will be skipped until the model is available locally.
+V2 and V3 can still run if this model is not cached, but semantic similarity findings and requirement type analysis will be skipped until the model is available locally.
 
 ---
 
@@ -286,6 +315,7 @@ http://localhost:3000
 4. Select analysis version:
    - V1
    - V2
+   - V3
 5. Click Analyze.
 
 Example requirement:
@@ -308,7 +338,8 @@ The system returns:
 - Improved text
 - Improved text options
 - Generated prompt
-- Pre-analysis details for V2
+- Analysis timing metadata
+- Pre-analysis details for V2 and V3
 
 ---
 
@@ -357,6 +388,30 @@ Measurement context observations are supporting data for the LLM, not direct amb
 
 ---
 
+## V3 Type-aware Output
+
+V3 includes all V2 pre-analysis output and can additionally return:
+
+- Requirement type analysis
+- Primary requirement type
+- Possible secondary requirement types
+- Type-aware observations
+- Semantic confidence
+
+Example:
+
+```text
+Type Analysis
+Detected Type: Safety (0.43)
+
+Type Observations
+- safe state: a safe state (0.57)
+```
+
+Low-confidence type analysis may be shown in the frontend as a possible type, but it is not added to the LLM prompt.
+
+---
+
 ## API Endpoint
 
 ```text
@@ -385,6 +440,7 @@ Example analysis versions:
 ```text
 v1
 v2
+v3
 ```
 
 ---
@@ -503,6 +559,18 @@ PreAnalysisService
 -> PreAnalysisResult
 ```
 
+V3 type analysis flow:
+
+```text
+PreAnalysisResult
+-> RequirementTypeAnalyzer
+-> requirement_types.json
+-> semantic similarity scoring
+-> primary/secondary type analysis
+-> type-aware observations
+-> V3 prompt context when reliable
+```
+
 ---
 
 ## Updating an Existing Local Copy
@@ -550,7 +618,8 @@ Planned next steps:
 
 - Review V1/V2 prompt fairness
 - Evaluate a fine-tuned BERT/transformer model trained on a requirement ambiguity dataset
-- V3 type-aware requirement analysis
-- Type-specific ambiguity dimensions
+- Improve rate-style measurement gap detection
+- Improve type-specific ambiguity dimensions
+- Improve security access-control pre-analysis
 - Improved frontend comparison between versions
 - Multi-agent feedback/review flow in later versions

@@ -40,6 +40,24 @@ class PromptBuilder:
         )
 
     #---------- <Summary> ----------
+    # Summary: Builds the V3 prompt enriched with NLP pre-analysis and requirement type context.
+    #---------- </Summary> ----------
+    def build_v3_prompt(self, pre_analysis: PreAnalysisResult) -> str:
+        if not self._has_meaningful_requirement_type_analysis(pre_analysis):
+            return self.build_v2_prompt(pre_analysis)
+
+        return "\n\n".join(
+            [
+                self._role_section(),
+                self._v2_requirement_input_section(pre_analysis),
+                self._v3_context_section(pre_analysis),
+                self._v3_instruction_section(),
+                self._output_contract_section(),
+                self._v3_output_rules_section(),
+            ]
+        )
+
+    #---------- <Summary> ----------
     # Summary: Checks whether V2 has useful findings to add to the prompt.
     #---------- </Summary> ----------
     def _has_meaningful_pre_analysis(self, pre_analysis: PreAnalysisResult) -> bool:
@@ -57,6 +75,19 @@ class PromptBuilder:
                 ],
             ]
         )
+
+    #---------- <Summary> ----------
+    # Summary: Checks whether V3 has useful requirement type context to add.
+    #---------- </Summary> ----------
+    def _has_meaningful_requirement_type_analysis(
+        self,
+        pre_analysis: PreAnalysisResult,
+    ) -> bool:
+        type_analysis = pre_analysis.requirement_type_analysis
+        if not type_analysis:
+            return False
+
+        return type_analysis.confidence >= 0.35 or bool(type_analysis.observations)
 
     #---------- <Summary> ----------
     # Summary: Defines the role the LLM should follow.
@@ -151,6 +182,64 @@ Analyze the following cleaned requirement:
         return "\n\n".join(sections)
 
     #---------- <Summary> ----------
+    # Summary: Formats V3 context by combining V2 pre-analysis and type analysis.
+    #---------- </Summary> ----------
+    def _v3_context_section(self, pre_analysis: PreAnalysisResult) -> str:
+        sections: list[str] = []
+        type_context = self._format_requirement_type_analysis(pre_analysis)
+        pre_analysis_context = self._v2_pre_analysis_section(pre_analysis)
+
+        if type_context:
+            sections.append(type_context)
+
+        if pre_analysis_context.strip() != "Pre-analysis:":
+            sections.append(pre_analysis_context)
+
+        return "\n\n".join(sections)
+
+    #---------- <Summary> ----------
+    # Summary: Formats detected requirement type and optional type-aware observations.
+    #---------- </Summary> ----------
+    def _format_requirement_type_analysis(
+        self,
+        pre_analysis: PreAnalysisResult,
+    ) -> str:
+        type_analysis = pre_analysis.requirement_type_analysis
+        if not type_analysis:
+            return ""
+
+        type_label = (
+            "Detected requirement type"
+            if type_analysis.confidence >= 0.35
+            else "Possible requirement type"
+        )
+        lines = [
+            "Requirement type analysis:",
+            f"{type_label}: {type_analysis.requirement_type}",
+            f"Semantic confidence: {type_analysis.confidence:.2f}",
+        ]
+        secondary_types = [
+            f"- {item.requirement_type} (confidence {item.confidence:.2f})"
+            for item in type_analysis.secondary_types
+        ]
+        if secondary_types:
+            lines.append("Possible secondary requirement types:")
+            lines.extend(secondary_types)
+
+        observations = [
+            (
+                f"- {item.checkpoint} appears related to \"{item.phrase}\" "
+                f"(score {item.similarity_score:.2f})"
+            )
+            for item in type_analysis.observations
+        ]
+        if observations:
+            lines.append("Type-aware observations:")
+            lines.extend(observations)
+
+        return "\n".join(lines)
+
+    #---------- <Summary> ----------
     # Summary: Formats structural measurement context as non-mandatory prompt support.
     #---------- </Summary> ----------
     def _format_measurement_contexts(self, pre_analysis: PreAnalysisResult) -> str:
@@ -205,6 +294,23 @@ Instructions:
 """.strip()
 
     #---------- <Summary> ----------
+    # Summary: Explains how the LLM should use V3 type analysis.
+    #---------- </Summary> ----------
+    def _v3_instruction_section(self) -> str:
+        return """
+Instructions:
+- Use the pre-analysis as supporting context.
+- Use the requirement type analysis as supporting context, not as an absolute decision.
+- If the requirement text clearly supports another listed type, use the better type in the final response.
+- Do not report excluded findings as ambiguities.
+- Use context observations as supporting context only; do not force them as ambiguities unless the requirement text supports it.
+- You may add other ambiguities only if they are clearly supported by the requirement text.
+- Preserve the meaning of the original requirement.
+- Generate a clearer and more testable improved requirement.
+- Generate multiple improved requirement alternatives with different clarification levels.
+""".strip()
+
+    #---------- <Summary> ----------
     # Summary: Defines the JSON fields expected from every analysis version.
     #---------- </Summary> ----------
     def _output_contract_section(self) -> str:
@@ -228,6 +334,24 @@ Rules:
   "As a <type of user>, I want <goal>, so that <reason>."
 - Do not use any other user story format.
 - requirementType must be one of: Functional, Performance, Security, Usability, Reliability, Maintainability, Portability, Other
+- ambiguities must be an array of objects with: phrase, reason, severity
+- suggestions must be an array of objects with: originalPart, suggestedPart, reason
+- improvedText must contain the best single improved requirement.
+- improvedTextOptions must be an array of objects with: label, text, reason
+- improvedTextOptions should include three alternatives: Minimal, Balanced, Strict
+- Return only valid JSON
+""".strip()
+
+    #---------- <Summary> ----------
+    # Summary: Defines V3 output rules using the agreed 10 requirement types.
+    #---------- </Summary> ----------
+    def _v3_output_rules_section(self) -> str:
+        return """
+Rules:
+- The userStory MUST strictly follow this format:
+  "As a <type of user>, I want <goal>, so that <reason>."
+- Do not use any other user story format.
+- requirementType must be one of: Functional, Performance Efficiency, Compatibility, Interaction Capability, Reliability, Security, Maintainability, Flexibility, Safety, Portability
 - ambiguities must be an array of objects with: phrase, reason, severity
 - suggestions must be an array of objects with: originalPart, suggestedPart, reason
 - improvedText must contain the best single improved requirement.

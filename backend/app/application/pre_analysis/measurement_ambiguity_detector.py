@@ -1,10 +1,19 @@
+import logging
+
+import torch
+import torch.nn.functional as functional
+from transformers import AutoModel, AutoTokenizer
+
 from app.domain.pre_analysis import (
     AnalyzedSentence,
     AnalyzedText,
+    AnalyzedToken,
     ExtractedEntity,
     MeasurableExpression,
     MeasurementAmbiguity,
 )
+
+logger = logging.getLogger(__name__)
 
 
 #---------- <Summary> ----------
@@ -12,10 +21,21 @@ from app.domain.pre_analysis import (
 #
 # This detector uses spaCy entities, token context, and sentence structure
 # instead of maintaining separate regex pattern JSON files. It treats measurable
-# values as useful but checks whether they still miss statistical, load, or
-# measurement-boundary context.
+# values as useful but checks whether they still miss statistical,
+# operating-condition, or measurement-boundary context.
 #---------- </Summary> ----------
 class MeasurementAmbiguityDetector:
+
+    def __init__(
+        self,
+        model_name: str = "sentence-transformers/all-mpnet-base-v2",
+        statistical_qualifier_threshold: float = 0.18,
+    ):
+        self.model_name = model_name
+        self.statistical_qualifier_threshold = statistical_qualifier_threshold
+        self.tokenizer = None
+        self.model = None
+        self._model_available: bool | None = None
 
     #---------- <Summary> ----------
     # Summary: Returns measurable expressions and measurement-related ambiguity findings.
@@ -43,15 +63,15 @@ class MeasurementAmbiguityDetector:
         expressions: list[MeasurableExpression] = []
 
         for entity in analyzed_text.entities:
-            category = self._category_for_entity(entity)
-            if not category:
-                continue
-
             sentence = self._find_sentence_for_range(
                 analyzed_text,
                 entity.start_char,
                 entity.end_char,
             )
+            category = self._category_for_entity(entity, sentence)
+            if not category:
+                continue
+
             start_char = self._expanded_start_char(entity, sentence, category)
             expression_text = analyzed_text.original_text[start_char:entity.end_char]
 
@@ -64,14 +84,28 @@ class MeasurementAmbiguityDetector:
                 )
             )
 
+        expressions.extend(
+            self._detect_structural_frequency_expressions(analyzed_text)
+        )
+
         return self._deduplicate(expressions)
 
     #---------- <Summary> ----------
-    # Summary: Maps spaCy entity labels to requirement measurement categories.
+    # Summary: Maps spaCy entity labels and sentence role to measurement categories.
     #---------- </Summary> ----------
-    def _category_for_entity(self, entity: ExtractedEntity) -> str | None:
+    def _category_for_entity(
+        self,
+        entity: ExtractedEntity,
+        sentence: AnalyzedSentence,
+    ) -> str | None:
         if entity.label in {"TIME", "DATE"}:
-            if self._is_frequency_expression(entity.text):
+            matching_tokens = self._tokens_for_entity(entity, sentence)
+            if self._is_descriptive_time_modifier(matching_tokens):
+                return None
+
+            if self._is_frequency_expression(entity.text) or self._is_frequency_entity(
+                matching_tokens,
+            ):
                 return "frequency"
 
             return "time"
@@ -88,19 +122,183 @@ class MeasurementAmbiguityDetector:
         return None
 
     #---------- <Summary> ----------
+    # Summary: Returns NLP tokens covered by one entity span.
+    #---------- </Summary> ----------
+    def _tokens_for_entity(
+        self,
+        entity: ExtractedEntity,
+        sentence: AnalyzedSentence,
+    ) -> list[AnalyzedToken]:
+        return [
+            token
+            for token in sentence.tokens
+            if entity.start_char <= token.start_char
+            and token.end_char <= entity.end_char
+        ]
+
+    #---------- <Summary> ----------
+    # Summary: Skips DATE/TIME entities used as noun modifiers instead of targets.
+    #---------- </Summary> ----------
+    def _is_descriptive_time_modifier(
+        self,
+        matching_tokens: list[AnalyzedToken],
+    ) -> bool:
+        if len(matching_tokens) != 1:
+            return False
+
+        token = matching_tokens[0]
+        return (
+            token.dependency in {"amod", "compound"}
+            and token.head_pos in {"NOUN", "PROPN"}
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Detects DATE/TIME entities that modify an action as recurrence.
+    #---------- </Summary> ----------
+    def _is_frequency_entity(
+        self,
+        matching_tokens: list[AnalyzedToken],
+    ) -> bool:
+        return any(
+            token.pos == "ADV"
+            and token.dependency == "advmod"
+            and token.head_pos == "VERB"
+            for token in matching_tokens
+        )
+
+    #---------- <Summary> ----------
     # Summary: Detects recurring interval wording from a measurable time entity.
     #---------- </Summary> ----------
     def _is_frequency_expression(self, text: str) -> bool:
         normalized_text = text.lower().strip()
 
-        return normalized_text.startswith("every ") or normalized_text.startswith("per ") or normalized_text in {
-            "daily",
-            "weekly",
-            "monthly",
-            "yearly",
-            "annually",
-            "hourly",
-        }
+        return normalized_text.startswith("every ") or normalized_text.startswith("per ")
+
+    #---------- <Summary> ----------
+    # Summary: Finds frequency phrases that spaCy does not expose as entities.
+    #---------- </Summary> ----------
+    def _detect_structural_frequency_expressions(
+        self,
+        analyzed_text: AnalyzedText,
+    ) -> list[MeasurableExpression]:
+        expressions: list[MeasurableExpression] = []
+
+        for sentence in analyzed_text.sentences:
+            for index, token in enumerate(sentence.tokens):
+                phrase_tokens = None
+                if self._is_adverbial_frequency_phrase(sentence.tokens, token):
+                    phrase_tokens = self._collect_adverbial_frequency_phrase_tokens(
+                        sentence.tokens,
+                        token,
+                    )
+                elif self._is_rate_frequency_phrase(sentence.tokens, index):
+                    phrase_tokens = self._collect_prepositional_phrase_tokens(
+                        sentence.tokens,
+                        index,
+                    )
+
+                if not phrase_tokens:
+                    continue
+
+                expressions.append(
+                    MeasurableExpression(
+                        text=analyzed_text.original_text[
+                            phrase_tokens[0].start_char:phrase_tokens[-1].end_char
+                        ],
+                        category="frequency",
+                        start_char=phrase_tokens[0].start_char,
+                        end_char=phrase_tokens[-1].end_char,
+                    )
+                )
+
+        return expressions
+
+    #---------- <Summary> ----------
+    # Summary: Detects determiner-led adverbial noun phrases such as every day.
+    #---------- </Summary> ----------
+    def _is_adverbial_frequency_phrase(
+        self,
+        tokens: list[AnalyzedToken],
+        token: AnalyzedToken,
+    ) -> bool:
+        if token.pos not in {"NOUN", "PROPN"}:
+            return False
+
+        if token.dependency != "npadvmod" or token.head_pos != "VERB":
+            return False
+
+        phrase_tokens = self._collect_adverbial_frequency_phrase_tokens(tokens, token)
+
+        return any(
+            phrase_token.pos == "DET"
+            and phrase_token.dependency == "det"
+            and phrase_token.head_text == token.text
+            for phrase_token in phrase_tokens
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Collects modifiers syntactically attached to an adverbial frequency noun.
+    #---------- </Summary> ----------
+    def _collect_adverbial_frequency_phrase_tokens(
+        self,
+        tokens: list[AnalyzedToken],
+        noun_token: AnalyzedToken,
+    ) -> list[AnalyzedToken]:
+        noun_index = tokens.index(noun_token)
+        start_index = noun_index
+
+        while start_index > 0:
+            previous_token = tokens[start_index - 1]
+            if previous_token.head_text != noun_token.text:
+                break
+
+            if previous_token.dependency not in {"det", "amod", "compound", "nummod"}:
+                break
+
+            start_index -= 1
+
+        return tokens[start_index:noun_index + 1]
+
+    #---------- <Summary> ----------
+    # Summary: Detects rate-style frequency phrases such as per second.
+    #---------- </Summary> ----------
+    def _is_rate_frequency_phrase(
+        self,
+        tokens: list[AnalyzedToken],
+        index: int,
+    ) -> bool:
+        token = tokens[index]
+        if token.pos != "ADP" or token.text.lower() != "per":
+            return False
+
+        return any(
+            following_token.pos in {"NOUN", "PROPN"}
+            and following_token.dependency == "pobj"
+            and following_token.head_text == token.text
+            for following_token in tokens[index + 1:index + 4]
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Collects a compact prepositional phrase starting at one token.
+    #---------- </Summary> ----------
+    def _collect_prepositional_phrase_tokens(
+        self,
+        tokens: list[AnalyzedToken],
+        start_index: int,
+    ) -> list[AnalyzedToken]:
+        phrase_tokens = [tokens[start_index]]
+
+        for token in tokens[start_index + 1:]:
+            if token.pos in {"DET", "ADJ", "NOUN", "PROPN", "NUM"}:
+                phrase_tokens.append(token)
+                continue
+
+            break
+
+        if len(phrase_tokens) < 2:
+            return []
+
+        return phrase_tokens
 
     #---------- <Summary> ----------
     # Summary: Includes a nearby preposition such as "within" when spaCy marks only the value.
@@ -166,14 +364,14 @@ class MeasurementAmbiguityDetector:
         if not self._is_performance_time_target(expression, sentence):
             return gaps
 
-        if not self._has_statistical_target(sentence, expressions):
+        if not self._has_statistical_target(sentence, expression, expressions):
             gaps.append(
                 self._build_measurement_ambiguity(
                     expression,
                     sentence,
                     missing_dimension="statisticalTarget",
-                    reason="The time target does not specify whether it is a maximum, average, median, or percentile-based target.",
-                    evidence="No percentage, ordinal percentile, or statistical qualifier was found in the same measurement sentence.",
+                    reason="The time target does not specify the required statistical interpretation, such as whether the target applies to all cases or a subset of cases.",
+                    evidence="No percentage-based target was found in the same measurement sentence.",
                     severity="medium",
                 )
             )
@@ -205,11 +403,12 @@ class MeasurementAmbiguityDetector:
         return gaps
 
     #---------- <Summary> ----------
-    # Summary: Uses percentage expressions or percentile wording as statistical context.
+    # Summary: Uses only reliable extracted percentage expressions as statistical context.
     #---------- </Summary> ----------
     def _has_statistical_target(
         self,
         sentence: AnalyzedSentence,
+        expression: MeasurableExpression,
         expressions: list[MeasurableExpression],
     ) -> bool:
         if any(
@@ -219,14 +418,158 @@ class MeasurementAmbiguityDetector:
         ):
             return True
 
-        return any(
-            (
-                token.pos in {"NOUN", "PROPN"}
-                and "percentile" in token.lemma.lower()
-            )
-            or token.lemma.lower() in {"average", "median", "maximum", "minimum"}
-            for token in sentence.tokens
+        return self._has_semantic_statistical_qualifier(sentence, expression)
+
+    #---------- <Summary> ----------
+    # Summary: Uses semantic similarity for metric qualifier phrases, not word matching.
+    #---------- </Summary> ----------
+    def _has_semantic_statistical_qualifier(
+        self,
+        sentence: AnalyzedSentence,
+        expression: MeasurableExpression,
+    ) -> bool:
+        candidates = self._statistical_qualifier_candidates(sentence, expression)
+        if not candidates:
+            return False
+
+        if not self._ensure_model_loaded():
+            return False
+
+        concept_embedding = self._encode_text(
+            "Statistical metric qualifier for a requirement measurement, such as "
+            "aggregation, distribution, central tendency, percentile, average, "
+            "median, minimum, maximum, or upper/lower bound across many measurements."
         )
+        candidate_embeddings = self._encode_texts(candidates)
+        similarities = functional.cosine_similarity(
+            concept_embedding.expand_as(candidate_embeddings),
+            candidate_embeddings,
+            dim=1,
+        )
+        best_score = float(torch.max(similarities).item())
+
+        return best_score >= self.statistical_qualifier_threshold
+
+    #---------- <Summary> ----------
+    # Summary: Extracts nearby metric noun phrases before a time target.
+    #---------- </Summary> ----------
+    def _statistical_qualifier_candidates(
+        self,
+        sentence: AnalyzedSentence,
+        expression: MeasurableExpression,
+    ) -> list[str]:
+        candidates: list[str] = []
+
+        for token in sentence.tokens:
+            if token.end_char > expression.start_char:
+                continue
+
+            if token.pos not in {"NOUN", "PROPN"}:
+                continue
+
+            if token.dependency not in {"dobj", "pobj", "attr", "nsubj"}:
+                continue
+
+            phrase_tokens = self._collect_noun_phrase_tokens(sentence.tokens, token)
+            if not self._has_metric_qualifier_structure(phrase_tokens):
+                continue
+
+            candidates.append(" ".join(token.text for token in phrase_tokens))
+
+        return list(dict.fromkeys(candidates[-3:]))
+
+    #---------- <Summary> ----------
+    # Summary: Collects a compact noun phrase around one noun token.
+    #---------- </Summary> ----------
+    def _collect_noun_phrase_tokens(
+        self,
+        tokens: list[AnalyzedToken],
+        noun_token: AnalyzedToken,
+    ) -> list[AnalyzedToken]:
+        noun_index = tokens.index(noun_token)
+        start_index = noun_index
+        while start_index > 0:
+            previous_token = tokens[start_index - 1]
+            if previous_token.pos not in {"DET", "ADJ", "NOUN", "PROPN", "NUM"}:
+                break
+
+            start_index -= 1
+
+        end_index = noun_index
+        while end_index + 1 < len(tokens):
+            next_token = tokens[end_index + 1]
+            if next_token.pos not in {"ADJ", "NOUN", "PROPN", "NUM"}:
+                break
+
+            end_index += 1
+
+        return tokens[start_index:end_index + 1]
+
+    #---------- <Summary> ----------
+    # Summary: Checks for a noun phrase structure that can carry metric qualification.
+    #---------- </Summary> ----------
+    def _has_metric_qualifier_structure(
+        self,
+        tokens: list[AnalyzedToken],
+    ) -> bool:
+        return any(token.pos in {"ADJ", "NUM"} for token in tokens[:-1])
+
+    #---------- <Summary> ----------
+    # Summary: Loads the local embedding model only when qualifier semantics are needed.
+    #---------- </Summary> ----------
+    def _ensure_model_loaded(self) -> bool:
+        if self._model_available is not None:
+            return self._model_available
+
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                local_files_only=True,
+            )
+            self.model = AutoModel.from_pretrained(
+                self.model_name,
+                local_files_only=True,
+            )
+            self.model.eval()
+            self._model_available = True
+        except Exception as error:
+            logger.warning(
+                "Measurement semantic qualifier model is not available locally. "
+                "Continuing without semantic statistical qualifier support. Error: %s",
+                str(error),
+            )
+            self._model_available = False
+
+        return self._model_available
+
+    #---------- <Summary> ----------
+    # Summary: Encodes one text into a normalized embedding vector.
+    #---------- </Summary> ----------
+    def _encode_text(self, text: str):
+        return self._encode_texts([text])
+
+    #---------- <Summary> ----------
+    # Summary: Encodes multiple texts using mean pooling over transformer tokens.
+    #---------- </Summary> ----------
+    def _encode_texts(self, texts: list[str]):
+        encoded = self.tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+        )
+
+        with torch.no_grad():
+            model_output = self.model(**encoded)
+
+        token_embeddings = model_output.last_hidden_state
+        attention_mask = encoded["attention_mask"].unsqueeze(-1)
+        masked_embeddings = token_embeddings * attention_mask
+        summed_embeddings = masked_embeddings.sum(dim=1)
+        token_counts = attention_mask.sum(dim=1).clamp(min=1)
+        embeddings = summed_embeddings / token_counts
+
+        return functional.normalize(embeddings, p=2, dim=1)
 
     #---------- <Summary> ----------
     # Summary: Detects operating context from prepositional phrases after the time target.
@@ -245,16 +588,16 @@ class MeasurementAmbiguityDetector:
         ):
             return True
 
-        for token in sentence.tokens:
+        for index, token in enumerate(sentence.tokens):
             if token.start_char < expression.end_char:
                 continue
 
-            if token.text.lower() in {"for", "of", "to"}:
+            if self._is_percentage_complement_preposition(token, expressions):
                 continue
 
-            if token.pos == "ADP" and self._prepositional_phrase_has_load_context(
+            if token.pos == "ADP" and self._prepositional_phrase_has_condition_context(
                     sentence,
-                    token.start_char,
+                    index,
                     expressions,
             ):
                 return True
@@ -290,42 +633,72 @@ class MeasurementAmbiguityDetector:
         return None
 
     #---------- <Summary> ----------
-    # Summary: Checks whether a post-measurement phrase describes operating load.
+    # Summary: Checks whether a post-measurement prepositional phrase gives condition context.
     #---------- </Summary> ----------
-    def _prepositional_phrase_has_load_context(
+    def _prepositional_phrase_has_condition_context(
         self,
         sentence: AnalyzedSentence,
-        preposition_start_char: int,
+        preposition_index: int,
         expressions: list[MeasurableExpression],
     ) -> bool:
-        later_tokens = [
-            token
-            for token in sentence.tokens
-            if token.start_char > preposition_start_char
-        ]
-
         if any(
-            token.lemma.lower() in {
-                "load",
-                "traffic",
-                "condition",
-                "environment",
-                "capacity",
-            }
-            for token in later_tokens
+            expression.start_char
+            <= sentence.tokens[preposition_index].start_char
+            < expression.end_char
+            for expression in expressions
         ):
-            return True
+            return False
 
-        if any(
-            token.pos in {"NOUN", "PROPN", "NUM"}
-            for token in later_tokens
-        ):
-            return True
+        phrase_tokens = []
+        for token in sentence.tokens[preposition_index + 1:]:
+            if token.pos in {"DET", "ADJ", "NOUN", "PROPN", "NUM"}:
+                phrase_tokens.append(token)
+                continue
+
+            if token.pos == "ADP" and phrase_tokens:
+                break
+
+            if token.pos == "PUNCT":
+                break
+
+            if phrase_tokens:
+                break
+
+        if self._tokens_overlap_expression(phrase_tokens, expressions):
+            return False
+
+        return any(token.pos in {"NOUN", "PROPN", "NUM"} for token in phrase_tokens)
+
+    #---------- <Summary> ----------
+    # Summary: Skips prepositional complements that belong to a percentage expression.
+    #---------- </Summary> ----------
+    def _is_percentage_complement_preposition(
+        self,
+        token: AnalyzedToken,
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        if token.pos != "ADP" or not token.head_text:
+            return False
 
         return any(
-            expression.category == "count"
-            and expression.start_char > preposition_start_char
-            and expression.text in sentence.text
+            expression.category == "percentage"
+            and token.start_char >= expression.end_char
+            and token.head_text in expression.text
+            for expression in expressions
+        )
+
+    #---------- <Summary> ----------
+    # Summary: Avoids treating another measurable expression as operating context.
+    #---------- </Summary> ----------
+    def _tokens_overlap_expression(
+        self,
+        tokens: list[AnalyzedToken],
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        return any(
+            token.start_char < expression.end_char
+            and token.end_char > expression.start_char
+            for token in tokens
             for expression in expressions
         )
 
@@ -338,7 +711,7 @@ class MeasurementAmbiguityDetector:
         expression: MeasurableExpression,
         expressions: list[MeasurableExpression],
     ) -> bool:
-        if self._has_statistical_target(sentence, expressions) and self._has_load_condition(
+        if self._has_statistical_target(sentence, expression, expressions) and self._has_load_condition(
             sentence,
             expression,
             expressions,

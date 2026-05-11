@@ -52,6 +52,8 @@ class MeasurementContextExtractor:
     ) -> MeasurementContext:
         time_target = self._first_expression_text(expressions, "time")
         percentage_target = self._last_expression_text(expressions, "percentage")
+        measured_item = self._find_measured_item(sentence, expressions)
+        nearby_action = self._find_nearby_action(sentence, expressions)
 
         return MeasurementContext(
             sentence=sentence.text,
@@ -64,10 +66,29 @@ class MeasurementContextExtractor:
             count_target=self._first_expression_text(expressions, "count"),
             load_context=self._find_load_context(sentence, expressions),
             statistical_target=self._find_statistical_target(sentence),
-            measured_item=self._find_measured_item(sentence, expressions),
-            nearby_action=self._find_nearby_action(sentence, expressions),
+            measured_item=self._filter_redundant_measured_item(
+                measured_item,
+                nearby_action,
+            ),
+            nearby_action=nearby_action,
             condition=self._find_condition_phrase(sentence, expressions),
         )
+
+    #---------- <Summary> ----------
+    # Summary: Avoids repeating an action object as the measured item.
+    #---------- </Summary> ----------
+    def _filter_redundant_measured_item(
+        self,
+        measured_item: str | None,
+        nearby_action: str | None,
+    ) -> str | None:
+        if not measured_item or not nearby_action:
+            return measured_item
+
+        if measured_item.lower() in nearby_action.lower():
+            return None
+
+        return measured_item
 
     #---------- <Summary> ----------
     # Summary: Returns the first measurable expression text for a category.
@@ -122,16 +143,9 @@ class MeasurementContextExtractor:
         return first_count.text
 
     #---------- <Summary> ----------
-    # Summary: Extracts statistical wording such as average, median, maximum, or percentile.
+    # Summary: Leaves statistical wording unset unless it is represented by reliable measurements.
     #---------- </Summary> ----------
-    def _find_statistical_target(self, sentence: AnalyzedSentence) -> str | None:
-        for token in sentence.tokens:
-            if token.lemma.lower() in {"average", "median", "maximum", "minimum"}:
-                return token.text
-
-            if "percentile" in token.lemma.lower():
-                return token.text
-
+    def _find_statistical_target(self, _sentence: AnalyzedSentence) -> str | None:
         return None
 
     #---------- <Summary> ----------
@@ -166,6 +180,7 @@ class MeasurementContextExtractor:
         return self._collect_noun_phrase_around(
             sentence.tokens,
             max(candidates, key=lambda token: token.start_char),
+            stop_char=first_time.start_char,
         )
 
     #---------- <Summary> ----------
@@ -175,6 +190,7 @@ class MeasurementContextExtractor:
         self,
         tokens: list[AnalyzedToken],
         noun_token: AnalyzedToken,
+        stop_char: int | None = None,
     ) -> str:
         phrase_tokens: list[AnalyzedToken] = []
         noun_index = tokens.index(noun_token)
@@ -190,6 +206,9 @@ class MeasurementContextExtractor:
         end_index = noun_index
         while end_index + 1 < len(tokens):
             next_token = tokens[end_index + 1]
+            if stop_char is not None and next_token.start_char >= stop_char:
+                break
+
             if next_token.pos not in {"ADJ", "NOUN", "PROPN", "NUM"}:
                 break
 
@@ -327,7 +346,7 @@ class MeasurementContextExtractor:
             if (
                 token.pos == "VERB"
                 and token.end_char <= first_expression_start
-                and token.dependency not in {"aux", "auxpass"}
+                and token.dependency not in {"aux", "auxpass", "amod"}
             )
         ]
 
@@ -351,6 +370,26 @@ class MeasurementContextExtractor:
         target_expressions = time_expressions or expressions
 
         return min(expression.start_char for expression in target_expressions)
+
+    #---------- <Summary> ----------
+    # Summary: Finds the end of the primary measurement expression.
+    #---------- </Summary> ----------
+    def _target_expression_end(
+        self,
+        expressions: list[MeasurableExpression],
+    ) -> int:
+        time_expressions = [
+            expression
+            for expression in expressions
+            if expression.category == "time"
+        ]
+        target_expressions = time_expressions or expressions
+        first_expression = min(
+            target_expressions,
+            key=lambda expression: expression.start_char,
+        )
+
+        return first_expression.end_char
 
     #---------- <Summary> ----------
     # Summary: Detects whether token collection reached a known measurement span.
@@ -387,7 +426,10 @@ class MeasurementContextExtractor:
         sentence: AnalyzedSentence,
         expressions: list[MeasurableExpression],
     ) -> str | None:
-        preferred_phrase: str | None = None
+        target_start = self._target_expression_start(expressions)
+        target_end = self._target_expression_end(expressions)
+        after_target: list[tuple[int, str]] = []
+        before_target: list[tuple[int, str]] = []
 
         for index, token in enumerate(sentence.tokens):
             if token.pos != "ADP":
@@ -396,20 +438,82 @@ class MeasurementContextExtractor:
             if self._starts_measurable_expression(token, expressions):
                 continue
 
-            if token.text.lower() in {"within", "for", "to", "of"}:
+            if self._is_percentage_complement_preposition(token, expressions):
                 continue
 
-            phrase = self._collect_condition_phrase(sentence.tokens, index)
-            if phrase:
-                if self._same_as_measured_item(phrase, sentence, expressions):
-                    continue
+            stop_char = target_start if token.start_char < target_start else None
+            phrase_tokens = self._collect_condition_tokens(
+                sentence.tokens,
+                index,
+                stop_char,
+            )
+            if not phrase_tokens:
+                continue
 
-                if self._looks_like_operating_condition(phrase):
-                    return phrase
+            if self._tokens_overlap_expression(phrase_tokens, expressions):
+                continue
 
-                preferred_phrase = preferred_phrase or phrase
+            if self._is_action_complement_before_frequency(
+                token,
+                phrase_tokens,
+                sentence,
+                expressions,
+            ):
+                continue
 
-        return preferred_phrase
+            if self._phrase_governs_target_expression(
+                phrase_tokens,
+                sentence,
+                expressions,
+            ):
+                continue
+
+            phrase = self._join_phrase_tokens(phrase_tokens)
+            if self._same_as_measured_item(phrase, sentence, expressions):
+                continue
+
+            phrase_start = phrase_tokens[0].start_char
+            phrase_end = phrase_tokens[-1].end_char
+            if phrase_start >= target_end:
+                after_target.append((phrase_start, phrase))
+                continue
+
+            if phrase_end <= target_start:
+                before_target.append((phrase_end, phrase))
+
+        if after_target:
+            return min(after_target, key=lambda item: item[0])[1]
+
+        if before_target:
+            return max(before_target, key=lambda item: item[0])[1]
+
+        return None
+
+    #---------- <Summary> ----------
+    # Summary: Avoids treating action complements as conditions for recurring intervals.
+    #---------- </Summary> ----------
+    def _is_action_complement_before_frequency(
+        self,
+        preposition: AnalyzedToken,
+        phrase_tokens: list[AnalyzedToken],
+        sentence: AnalyzedSentence,
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        target_expression = self._target_expression(expressions)
+        if target_expression.category != "frequency":
+            return False
+
+        if phrase_tokens[-1].end_char > target_expression.start_char:
+            return False
+
+        measured_verb = self._find_measured_verb(sentence, expressions)
+        if not measured_verb or not preposition.head_text:
+            return False
+
+        return (
+            preposition.dependency == "prep"
+            and preposition.head_text == measured_verb.text
+        )
 
     #---------- <Summary> ----------
     # Summary: Avoids repeating the measured item as a condition phrase.
@@ -425,27 +529,88 @@ class MeasurementContextExtractor:
         return bool(measured_item and phrase.lower() == f"with {measured_item}".lower())
 
     #---------- <Summary> ----------
-    # Summary: Prioritizes phrases that look like operating or environmental conditions.
+    # Summary: Skips prepositional complements that belong to a percentage expression.
     #---------- </Summary> ----------
-    def _looks_like_operating_condition(self, phrase: str) -> bool:
-        normalized_phrase = phrase.lower()
+    def _is_percentage_complement_preposition(
+        self,
+        token: AnalyzedToken,
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        if token.pos != "ADP" or not token.head_text:
+            return False
 
         return any(
-            word in normalized_phrase
-            for word in {"load", "condition", "environment", "traffic", "capacity"}
+            expression.category == "percentage"
+            and token.start_char >= expression.end_char
+            and token.head_text in expression.text
+            for expression in expressions
         )
 
     #---------- <Summary> ----------
-    # Summary: Collects a prepositional condition phrase from token context.
+    # Summary: Skips metric phrases that syntactically govern the time expression.
     #---------- </Summary> ----------
-    def _collect_condition_phrase(
+    def _phrase_governs_target_expression(
+        self,
+        phrase_tokens: list[AnalyzedToken],
+        sentence: AnalyzedSentence,
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        target_expression = self._target_expression(expressions)
+        first_target_token = self._first_token_in_expression(
+            sentence,
+            target_expression,
+        )
+        if not first_target_token or not first_target_token.head_text:
+            return False
+
+        phrase_texts = {token.text for token in phrase_tokens}
+        return first_target_token.head_text in phrase_texts
+
+    #---------- <Summary> ----------
+    # Summary: Returns the primary measurement expression used for context.
+    #---------- </Summary> ----------
+    def _target_expression(
+        self,
+        expressions: list[MeasurableExpression],
+    ) -> MeasurableExpression:
+        time_expressions = [
+            expression
+            for expression in expressions
+            if expression.category == "time"
+        ]
+        target_expressions = time_expressions or expressions
+
+        return min(target_expressions, key=lambda expression: expression.start_char)
+
+    #---------- <Summary> ----------
+    # Summary: Finds the first token inside one measurable expression.
+    #---------- </Summary> ----------
+    def _first_token_in_expression(
+        self,
+        sentence: AnalyzedSentence,
+        expression: MeasurableExpression,
+    ) -> AnalyzedToken | None:
+        for token in sentence.tokens:
+            if expression.start_char <= token.start_char < expression.end_char:
+                return token
+
+        return None
+
+    #---------- <Summary> ----------
+    # Summary: Collects tokens for a compact prepositional phrase.
+    #---------- </Summary> ----------
+    def _collect_condition_tokens(
         self,
         tokens: list[AnalyzedToken],
         start_index: int,
-    ) -> str | None:
+        stop_char: int | None = None,
+    ) -> list[AnalyzedToken]:
         phrase_tokens = [tokens[start_index]]
 
         for token in tokens[start_index + 1:]:
+            if stop_char is not None and token.start_char >= stop_char:
+                break
+
             if token.pos in {"DET", "ADJ", "NOUN", "PROPN", "NUM"}:
                 phrase_tokens.append(token)
                 continue
@@ -465,9 +630,24 @@ class MeasurementContextExtractor:
             break
 
         if len(phrase_tokens) < 2:
-            return None
+            return []
 
-        return self._join_phrase_tokens(phrase_tokens)
+        return phrase_tokens
+
+    #---------- <Summary> ----------
+    # Summary: Avoids treating the measurable expression itself as a condition phrase.
+    #---------- </Summary> ----------
+    def _tokens_overlap_expression(
+        self,
+        tokens: list[AnalyzedToken],
+        expressions: list[MeasurableExpression],
+    ) -> bool:
+        return any(
+            token.start_char < expression.end_char
+            and token.end_char > expression.start_char
+            for token in tokens
+            for expression in expressions
+        )
 
     #---------- <Summary> ----------
     # Summary: Joins condition tokens while preserving hyphenated phrases cleanly.

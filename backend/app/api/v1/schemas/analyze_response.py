@@ -149,6 +149,39 @@ class PreAnalysisSemanticFindingItem(BaseModel):
 
 
 #---------- <Summary> ----------
+# Summary: Type-aware observation found by V3 semantic requirement type analysis.
+#---------- </Summary> ----------
+class PreAnalysisRequirementTypeObservationItem(BaseModel):
+
+    checkpoint: str
+    phrase: str
+    similarityScore: float
+    sentence: str
+
+
+#---------- <Summary> ----------
+# Summary: Secondary V3 requirement type candidate.
+#---------- </Summary> ----------
+class PreAnalysisSecondaryRequirementTypeItem(BaseModel):
+
+    requirementType: str
+    confidence: float
+    description: str
+
+
+#---------- <Summary> ----------
+# Summary: V3 semantic requirement type analysis details.
+#---------- </Summary> ----------
+class PreAnalysisRequirementTypeAnalysisItem(BaseModel):
+
+    requirementType: str
+    confidence: float
+    description: str
+    secondaryTypes: list[PreAnalysisSecondaryRequirementTypeItem]
+    observations: list[PreAnalysisRequirementTypeObservationItem]
+
+
+#---------- <Summary> ----------
 # Summary: Structured pre-analysis details returned for enhanced analysis versions.
 #---------- </Summary> ----------
 class PreAnalysisInfo(BaseModel):
@@ -162,7 +195,18 @@ class PreAnalysisInfo(BaseModel):
     measurementContexts: list[PreAnalysisMeasurementContextItem]
     measurableExpressions: list[PreAnalysisMeasurableExpressionItem]
     semanticFindings: list[PreAnalysisSemanticFindingItem]
+    requirementTypeAnalysis: PreAnalysisRequirementTypeAnalysisItem | None = None
     promptGuidance: list[str]
+
+
+#---------- <Summary> ----------
+# Summary: Timing metadata for analysis performance visibility.
+#---------- </Summary> ----------
+class AnalyzeTimingInfo(BaseModel):
+
+    preAnalysisMs: int
+    llmMs: int
+    totalMs: int
 
 
 #---------- <Summary> ----------
@@ -181,5 +225,6 @@ class AnalyzeResponse(BaseModel):
     isFallback: bool
     warnings: list[str]
     errors: list[str]
+    timings: AnalyzeTimingInfo
     promptUsed: str
     preAnalysis: PreAnalysisInfo | None
